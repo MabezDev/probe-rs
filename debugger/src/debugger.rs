@@ -1,24 +1,20 @@
+use crate::dap_types::*;
 use crate::debug_adapter::*;
-use crate::{dap_types::*, rtt::*};
 
 use crate::DebuggerError;
 use anyhow::{anyhow, Result};
 use capstone::{arch::arm::ArchMode, prelude::*, Capstone, Endian};
 use probe_rs::debug::DebugInfo;
 use probe_rs::flashing::{download_file, download_file_with_options, DownloadOptions, Format};
-use probe_rs::{
-    config::{MemoryRegion, TargetSelector},
-    ProbeCreationError,
-};
+use probe_rs::{config::TargetSelector, ProbeCreationError};
 use probe_rs::{
     Core, CoreStatus, DebugProbeError, DebugProbeSelector, MemoryInterface, Probe, Session,
     WireProtocol,
 };
-use probe_rs_rtt::{Rtt, ScanRegion};
+use probe_rs_cli_util::rtt;
 use serde::Deserialize;
 use std::{
     env::{current_dir, set_current_dir},
-    fs::File,
     io,
     io::{Read, Write},
     net::{Ipv4Addr, TcpListener, ToSocketAddrs},
@@ -160,7 +156,7 @@ pub struct DebuggerOptions {
 
     #[structopt(flatten)]
     #[serde(flatten)]
-    pub(crate) rtt: RttConfig,
+    pub(crate) rtt: rtt::RttConfig,
 }
 
 impl DebuggerOptions {
@@ -214,7 +210,7 @@ pub struct Debugger {
     all_commands: Vec<DebugCommand>,
     pub supported_commands: Vec<DebugCommand>,
     /// The optional connection to RTT on the target
-    target_rtt: Option<RttActiveTarget>,
+    target_rtt: Option<rtt::RttActiveTarget>,
 }
 
 pub struct SessionData {
@@ -1057,10 +1053,12 @@ impl Debugger {
 
             // This is a good time to initialize RTT if it is enabled
             self.target_rtt = if self.debugger_options.rtt.enabled {
-                match attach_to_rtt(
+                match rtt::attach_to_rtt(
                     &mut core_data.target_core,
                     &memory_map,
-                    &self.debugger_options,
+                    // We can safely unwrap() program_binary here, because it is validated to exist at startup of the debugger
+                    &self.debugger_options.program_binary.as_ref().unwrap(),
+                    &self.debugger_options.rtt,
                 ) {
                     Ok(target_rtt) => {
                         for any_channel in target_rtt.active_channels.iter() {
@@ -1118,51 +1116,6 @@ impl Debugger {
         // Exiting this function means the debug_session is complete and we are done. End of process.
         // TODO: Add functionality to keep the server alive, respond to DAP Client sessions that end, and accept new session requests.
     }
-}
-
-pub fn attach_to_rtt(
-    core: &mut Core,
-    memory_map: &[MemoryRegion],
-    debugger_options: &DebuggerOptions,
-) -> Result<crate::rtt::RttActiveTarget, anyhow::Error> {
-    let t = std::time::Instant::now();
-    let mut error = None;
-
-    let mut i = 1;
-
-    while (t.elapsed().as_millis() as usize) < debugger_options.rtt.timeout {
-        log::info!("Initializing RTT (attempt {})...", i);
-        i += 1;
-
-        let rtt_header_address = if let Ok(mut file) =
-            File::open(debugger_options.program_binary.clone().unwrap().as_path())
-        {
-            if let Some(address) = RttActiveTarget::get_rtt_symbol(&mut file) {
-                ScanRegion::Exact(address as u32)
-            } else {
-                ScanRegion::Ram
-            }
-        } else {
-            ScanRegion::Ram
-        };
-
-        match Rtt::attach_region(core, memory_map, &rtt_header_address) {
-            Ok(rtt) => {
-                log::info!("RTT initialized.");
-                let app = RttActiveTarget::new(rtt, debugger_options)?;
-                return Ok(app);
-            }
-            Err(err) => {
-                error = Some(anyhow!("Error attempting to attach to RTT: {}", err));
-            }
-        };
-
-        log::debug!("Timeout reading RTT control block. Retrying until timeout.");
-    }
-    if let Some(error) = error {
-        return Err(error);
-    }
-    Err(anyhow!("Rtt initialization failed."))
 }
 
 pub fn list_connected_devices() -> Result<()> {

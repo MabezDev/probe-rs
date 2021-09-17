@@ -3,7 +3,6 @@ mod dap_types;
 mod debug_adapter;
 mod debugger;
 mod info;
-mod rtt;
 
 use anyhow::Result;
 use debugger::{

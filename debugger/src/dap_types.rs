@@ -2,6 +2,7 @@
 use crate::DebuggerError;
 use num_traits::Num;
 use parse_int::parse;
+use probe_rs_cli_util::rtt;
 use schemafy::schemafy;
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
@@ -12,7 +13,7 @@ schemafy!(root: debugserver_types "src/debugProtocol.json");
 pub struct RttChannelEventBody {
     pub channel_number: usize,
     pub channel_name: String,
-    pub data_format: crate::rtt::DataFormat,
+    pub data_format: rtt::DataFormat,
 }
 
 #[derive(Clone, PartialEq, Debug, Deserialize, Serialize)]
