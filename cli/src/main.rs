@@ -1,6 +1,7 @@
 mod common;
 mod debugger;
 mod info;
+mod run;
 
 use debugger::CliState;
 
@@ -113,6 +114,15 @@ enum Cli {
         #[structopt(flatten)]
         common: ProbeOptions,
     },
+    /// Flash and run an ELF program
+    #[structopt(name = "run")]
+    Run {
+        #[structopt(flatten)]
+        common: ProbeOptions,
+
+        /// The path to the ELF file to flash and run
+        path: String,
+    },
     #[structopt(name = "trace")]
     Trace {
         #[structopt(flatten)]
@@ -166,6 +176,7 @@ fn main() -> Result<()> {
             skip_bytes,
             path,
         } => download_program_fast(common, format.into(base_address, skip_bytes), &path),
+        Cli::Run { common, path } => run::run(common, &path),
         Cli::Erase { common } => erase(&common),
         Cli::Trace {
             shared,
