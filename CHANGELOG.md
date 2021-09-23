@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added progress bars to the probe-rs-cli download command. (#776)
 - Improve reliability of communication with the RISCV debug module by recovering from busy errors in batch operations. (#802)
 - Add optional ability to load fixed address flashing algorithms (non PIC). (#822)
+- Added `probe-rs-cli run` command, to flash and run a binary showing RTT output.
 
 ### Removed
 
