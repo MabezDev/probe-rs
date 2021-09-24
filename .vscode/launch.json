@@ -7,61 +7,20 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Launch smoke tester",
+            "name": "Debug executable 'probe-rs-cli'",
             "cargo": {
                 "args": [
                     "build",
-                    "--package=smoke_tester"
-                ]
-            },
-            "program": "${cargo:program}",
-            "args": [
-                "--dut-definitions=../dut-definitions/"
-            ]
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "DAP-STDIO probe-rs-debugger", // Use this to test the dap server, in 'launch' mode.
-            "cargo": {
-                "args": [
-                    "build",
-                    "--bin=probe-rs-debugger",
-                    "--package=probe-rs-debugger"
+                    "--bin=probe-rs-cli",
+                    "--package=probe-rs-cli"
                 ],
                 "filter": {
-                    "name": "probe-rs-debugger",
+                    "name": "probe-rs-cli",
                     "kind": "bin"
                 }
             },
-            "args": [
-                "debug",
-                "--dap"
-            ],
-            "cwd": "${workspaceFolder}/debugger"
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "DAP-Server probe-rs-debugger", // Use this to test the dap server in 'attach' mode.
-            "cargo": {
-                "args": [
-                    "build",
-                    "--bin=probe-rs-debugger",
-                    "--package=probe-rs-debugger"
-                ],
-                "filter": {
-                    "name": "probe-rs-debugger",
-                    "kind": "bin"
-                }
-            },
-            "args": [
-                "debug",
-                "--dap",
-                "--port",
-                "50001"
-            ],
-            "cwd": "${workspaceFolder}/debugger"
+            "args": ["run", "/home/mabez/development/rust/embedded/experiments/esp32c3/target/riscv32imc-unknown-none-elf/debug/esp32c3", "--chip", "esp32c3", "--protocol", "jtag"],
+            "cwd": "${workspaceFolder}"
         }
     ]
 }
