@@ -39,7 +39,7 @@ pub fn run(common: ProbeOptions, path: &str) -> Result<()> {
     )?;
 
     let mut rtt_config = rtt::RttConfig::default();
-    rtt_config.timeout = 500; // ms
+    rtt_config.timeout = 5000; // ms
 
     let memory_map = session.target().memory_map.clone();
 
