@@ -1,5 +1,3 @@
-
-
 #![allow(unused)] // FIXME remove after testing
 
 use crate::{
@@ -9,13 +7,13 @@ use crate::{
 
 use super::communication_interface::XtensaError;
 
-const NARADR_OCDID: u64 = 0x40;
-const NARADR_DCRSET: u64 = 0x43;
-const NARADR_DCRCLR: u32 = 0x42;
-const NARADR_DSR: u64 = 0x44;
-const NARADR_DDR: u32 = 0x45;
-const NARADR_DDREXEC: u32 = 0x46;
-const NARADR_DIR0EXEC: u32 = 0x47;
+const NARADR_OCDID: u8 = 0x40;
+const NARADR_DCRSET: u8 = 0x43;
+const NARADR_DCRCLR: u8 = 0x42;
+const NARADR_DSR: u8 = 0x44;
+const NARADR_DDR: u8 = 0x45;
+const NARADR_DDREXEC: u8 = 0x46;
+const NARADR_DIR0EXEC: u8 = 0x47;
 
 const XDM_REGISTER_WIDTH: u32 = 32;
 
@@ -70,15 +68,23 @@ impl Xdm {
         };
 
         // Wakeup and enable the JTAG
-        if let Err(e) = x.pwr_write(PowerDevice::PowerControl, PWRCTL_DEBUGWAKEUP | PWRCTL_MEMWAKEUP | PWRCTL_COREWAKEUP) {
+        if let Err(e) = x.pwr_write(
+            PowerDevice::PowerControl,
+            PWRCTL_DEBUGWAKEUP | PWRCTL_MEMWAKEUP | PWRCTL_COREWAKEUP,
+        ) {
             return Err((x.free(), e.into()));
         }
-        if let Err(e) = x.pwr_write(PowerDevice::PowerControl, PWRCTL_DEBUGWAKEUP | PWRCTL_MEMWAKEUP | PWRCTL_COREWAKEUP | PWRCTL_JTAGDEBUGUSE) {
+        if let Err(e) = x.pwr_write(
+            PowerDevice::PowerControl,
+            PWRCTL_DEBUGWAKEUP | PWRCTL_MEMWAKEUP | PWRCTL_COREWAKEUP | PWRCTL_JTAGDEBUGUSE,
+        ) {
             return Err((x.free(), e.into()));
         }
 
+        std::thread::sleep(std::time::Duration::from_secs(1));
+
         // enable the debug module
-        if let Err(e) = x.dbg_write(NARADR_DCRSET, 1 | 2) {
+        if let Err(e) = x.dbg_write(NARADR_DCRSET, 1) {
             return Err((x.free(), e.into()));
         }
 
@@ -98,11 +104,8 @@ impl Xdm {
     }
 
     /// Perform an access to a register
-    fn dbg_read(
-        &mut self,
-        address: u64,
-    ) -> Result<u32, DebugProbeError> {
-        let regdata = ((address as u8) << 1) | 0;
+    fn dbg_read(&mut self, address: u8) -> Result<u32, DebugProbeError> {
+        let regdata = (address << 1) | 0;
 
         // TODO check response for error
         let res = self.probe.write_register(DEBUG_ADDR, &[regdata], 8)?;
@@ -116,12 +119,8 @@ impl Xdm {
     }
 
     /// Perform an access to a register
-    fn dbg_write(
-        &mut self,
-        address: u64,
-        value: u32,
-    ) -> Result<u32, DebugProbeError> {
-        let regdata = ((address as u8) << 1) | 1;
+    fn dbg_write(&mut self, address: u8, value: u32) -> Result<u32, DebugProbeError> {
+        let regdata = (address << 1) | 1;
 
         // TODO check error in response
         let res = self.probe.write_register(DEBUG_ADDR, &[regdata], 8)?;
@@ -136,24 +135,15 @@ impl Xdm {
         Ok(u32::from_le_bytes((&res[..]).try_into().unwrap()))
     }
 
-    fn pwr_write(
-        &mut self,
-        dev: PowerDevice,
-        value: u8,
-    ) -> Result<u8, DebugProbeError> {
-        let res =
-            self.probe
-                .write_register(dev as u32, &[value], 8)?;
+    fn pwr_write(&mut self, dev: PowerDevice, value: u8) -> Result<u8, DebugProbeError> {
+        let res = self.probe.write_register(dev as u32, &[value], 8)?;
 
         log::info!("pwr_write response: {:?}", res);
 
         Ok(res[0])
     }
 
-     fn pwr_read(
-        &mut self,
-        dev: PowerDevice,
-    ) -> Result<u8, DebugProbeError> {
+    fn pwr_read(&mut self, dev: PowerDevice) -> Result<u8, DebugProbeError> {
         let res = self.probe.read_register(dev as u32, 8)?;
 
         log::info!("pwr_write response: {:?}", res);
@@ -162,7 +152,7 @@ impl Xdm {
     }
 
     fn status(&mut self) -> Result<u32, DebugProbeError> {
-        self.dbg_read( NARADR_DSR)
+        self.dbg_read(NARADR_DSR)
     }
 
     fn free(self) -> Box<dyn JTAGAccess> {

@@ -33,10 +33,6 @@ impl XtensaCommunicationInterface {
 
         let s = Self { xdm };
 
-        // if let Err(err) = s.enter_debug_mode() {
-        //     return Err((s.dtm.probe, DebugProbeError::from(anyhow!(err))));
-        // }
-
         Ok(s)
     }
 }
