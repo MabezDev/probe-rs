@@ -6,6 +6,7 @@ pub(crate) mod ftdi;
 pub(crate) mod jlink;
 pub(crate) mod stlink;
 
+use crate::architecture::xtensa::communication_interface::XtensaCommunicationInterface;
 use crate::error::Error;
 use crate::Session;
 use crate::{
@@ -464,6 +465,29 @@ impl Probe {
         }
     }
 
+    /// Check if the probe has an interface to
+    /// debug Xtensa chips.
+    pub fn has_xtensa_interface(&self) -> bool {
+        self.inner.has_xtensa_interface()
+    }
+
+    /// Try to get a [`XtensaCommunicationInterface`], which can
+    /// can be used to communicate with chips using the Xtensa
+    /// architecture.
+    ///
+    /// If an error occurs while trying to connect, the probe is returned.
+    pub fn try_into_xtensa_interface(
+        self,
+    ) -> Result<XtensaCommunicationInterface, (Self, DebugProbeError)> {
+        if !self.attached {
+            Err((self, DebugProbeError::NotAttached))
+        } else {
+            self.inner
+                .try_get_xtensa_interface()
+                .map_err(|(probe, err)| (Probe::from_attached_probe(probe), err))
+        }
+    }
+
     /// Gets a SWO interface from the debug probe.
     ///
     /// This does not work on all probes.
@@ -584,6 +608,22 @@ pub trait DebugProbe: Send + fmt::Debug {
 
     /// Check if the probe offers an interface to debug RISCV chips.
     fn has_riscv_interface(&self) -> bool {
+        false
+    }
+
+    /// Get the dedicated interface to debug RISCV chips. Ensure that the
+    /// probe actually supports this by calling [DebugProbe::has_xtensa_interface] first.
+    fn try_get_xtensa_interface(
+        self: Box<Self>,
+    ) -> Result<XtensaCommunicationInterface, (Box<dyn DebugProbe>, DebugProbeError)> {
+        Err((
+            self.into_probe(),
+            DebugProbeError::InterfaceNotAvailable("Xtensa"),
+        ))
+    }
+
+    /// Check if the probe offers an interface to debug RISCV chips.
+    fn has_xtensa_interface(&self) -> bool {
         false
     }
 

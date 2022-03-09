@@ -7,6 +7,7 @@ use std::iter;
 use std::time::{Duration, Instant};
 
 use crate::architecture::arm::RawDapAccess;
+use crate::architecture::xtensa::communication_interface::XtensaCommunicationInterface;
 use crate::{
     architecture::{
         arm::{
@@ -594,6 +595,20 @@ impl DebugProbe for JLink {
 
     fn has_riscv_interface(&self) -> bool {
         self.supported_protocols.contains(&WireProtocol::Jtag)
+    }
+
+    fn try_get_xtensa_interface(
+        self: Box<Self>,
+    ) -> Result<XtensaCommunicationInterface, (Box<dyn DebugProbe>, DebugProbeError)> {
+        // This probe is intended for Xtensa.
+        match XtensaCommunicationInterface::new(self) {
+            Ok(interface) => Ok(interface),
+            Err((probe, err)) => Err((probe.into_probe(), err)),
+        }
+    }
+
+    fn has_xtensa_interface(&self) -> bool {
+        true
     }
 
     fn into_probe(self: Box<Self>) -> Box<dyn DebugProbe> {

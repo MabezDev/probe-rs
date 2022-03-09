@@ -1,3 +1,4 @@
+use crate::architecture::xtensa::communication_interface::XtensaCommunicationInterface;
 use crate::architecture::{
     arm::communication_interface::UninitializedArmProbe,
     riscv::communication_interface::RiscvCommunicationInterface,
@@ -485,6 +486,7 @@ impl DebugProbe for FtdiProbe {
         } else {
             let known_idcodes = [
                 0x1000563d, // GD32VF103
+                0x120034e5, // ESP32
             ];
             let idcode = taps
                 .iter()
@@ -555,6 +557,20 @@ impl DebugProbe for FtdiProbe {
     ) -> Result<Box<dyn UninitializedArmProbe + 'probe>, (Box<dyn DebugProbe>, DebugProbeError)>
     {
         todo!()
+    }
+
+    fn try_get_xtensa_interface(
+        self: Box<Self>,
+    ) -> Result<XtensaCommunicationInterface, (Box<dyn DebugProbe>, DebugProbeError)> {
+        // This probe is intended for Xtensa.
+        match XtensaCommunicationInterface::new(self) {
+            Ok(interface) => Ok(interface),
+            Err((probe, err)) => Err((probe.into_probe(), err)),
+        }
+    }
+
+    fn has_xtensa_interface(&self) -> bool {
+        true
     }
 }
 

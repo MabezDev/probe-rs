@@ -12,7 +12,7 @@ use crate::{
             communication_interface::{DapProbe, UninitializedArmProbe},
             SwoAccess,
         },
-        riscv::communication_interface::RiscvCommunicationInterface,
+        riscv::communication_interface::RiscvCommunicationInterface, xtensa::communication_interface::XtensaCommunicationInterface,
     },
     probe::jlink::bits_to_byte,
     DebugProbe, DebugProbeError, DebugProbeSelector, WireProtocol,
@@ -468,5 +468,19 @@ impl DebugProbe for EspUsbJtag {
     fn get_target_voltage(&mut self) -> Result<Option<f32>, DebugProbeError> {
         // We cannot read the voltage on this probe, unfortunately.
         Ok(None)
+    }
+
+    fn try_get_xtensa_interface(
+        self: Box<Self>,
+    ) -> Result<XtensaCommunicationInterface, (Box<dyn DebugProbe>, DebugProbeError)> {
+        // This probe is intended for Xtensa.
+        match XtensaCommunicationInterface::new(self) {
+            Ok(interface) => Ok(interface),
+            Err((probe, err)) => Err((probe.into_probe(), err)),
+        }
+    }
+
+    fn has_xtensa_interface(&self) -> bool {
+        true
     }
 }
