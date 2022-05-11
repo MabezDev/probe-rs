@@ -107,7 +107,7 @@ impl JLink {
         // Last bit of data is shifted out when we exi the SHIFT-DR State
         let tms_shift_out_value = iter::repeat(false).take(register_bits - 1);
 
-        let tms_enter_idle = [true, true, false];
+        let tms_enter_idle = [true, false, true, true, false];
 
         let mut tms = Vec::with_capacity(register_bits + 7);
 
@@ -171,7 +171,7 @@ impl JLink {
         // we have bits to transmit
         let tms_data = iter::repeat(false).take(len - 1);
 
-        let tms_enter_idle = [true, true, false];
+        let tms_enter_idle = [true, false, true, true, false];
 
         let mut tms = Vec::with_capacity(tms_enter_ir_shift.len() + len + tms_enter_ir_shift.len());
 
@@ -183,7 +183,7 @@ impl JLink {
 
         // This is one less than the enter idle for tms, because
         // the last bit is transmitted when exiting the IR shift state
-        let tdi_enter_idle = [false, false];
+        let tdi_enter_idle = [false, false, false, false];
 
         let mut tdi = Vec::with_capacity(tdi_enter_ir_shift.len() + tdi_enter_idle.len() + len);
 
@@ -242,7 +242,7 @@ impl JLink {
         // Last bit of data is shifted out when we exi the SHIFT-DR State
         let tms_shift_out_value = iter::repeat(false).take(register_bits - 1);
 
-        let tms_enter_idle = [true, true, false];
+        let tms_enter_idle = [true, false, true, true, false];
 
         let mut tms = Vec::with_capacity(register_bits + 7);
 
@@ -252,7 +252,7 @@ impl JLink {
 
         let tdi_enter_shift = [false, false, false];
 
-        let tdi_enter_idle = [false, false];
+        let tdi_enter_idle = [false, false, false, false];
 
         // TODO: TDI data
         let mut tdi =

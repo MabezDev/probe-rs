@@ -11,6 +11,7 @@ fn main() -> Result<()> {
     let mut probe: Probe = probes[0].open()?;
 
     probe.set_speed(100)?;
+    probe.select_protocol(probe_rs::WireProtocol::Jtag)?;
     probe.attach_to_unspecified()?;
     let _iface = probe
         .try_into_xtensa_interface()

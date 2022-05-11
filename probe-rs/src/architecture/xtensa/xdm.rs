@@ -55,7 +55,7 @@ pub struct Xdm {
 impl Xdm {
     pub fn new(mut probe: Box<dyn JTAGAccess>) -> Result<Self, (Box<dyn JTAGAccess>, XtensaError)> {
         // TODO calculate idle cycles? see esp32_queue_tdi_idle() in openocd
-        let idle_cycles = 100;
+        let idle_cycles = 1;
 
         // Setup the number of idle cycles between JTAG accesses
         probe.set_idle_cycles(idle_cycles);
@@ -81,7 +81,7 @@ impl Xdm {
             return Err((x.free(), e.into()));
         }
 
-        std::thread::sleep(std::time::Duration::from_secs(1));
+        std::thread::sleep(std::time::Duration::from_secs(1)); // TODO remove this
 
         // enable the debug module
         if let Err(e) = x.dbg_write(NARADR_DCRSET, 1) {

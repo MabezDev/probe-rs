@@ -50,7 +50,7 @@ impl EspUsbJtag {
         // Last bit of data is shifted out when we exit the SHIFT-DR State.
         let tms_shift_out_value = iter::repeat(false).take(register_bits - 1);
 
-        let tms_enter_idle = [true, true, false];
+        let tms_enter_idle = [true, false, true, true, false];
 
         let mut tms = Vec::with_capacity(register_bits + 7);
 
@@ -186,7 +186,7 @@ impl EspUsbJtag {
         // Last bit of data is shifted out when we exi the SHIFT-DR State
         let tms_shift_out_value = iter::repeat(false).take(register_bits - 1);
 
-        let tms_enter_idle = [true, true, false];
+        let tms_enter_idle = [true, false, true, true, false];
 
         let mut tms = Vec::with_capacity(register_bits + 7);
 
