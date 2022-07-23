@@ -55,10 +55,13 @@ pub struct Xdm {
 impl Xdm {
     pub fn new(mut probe: Box<dyn JTAGAccess>) -> Result<Self, (Box<dyn JTAGAccess>, XtensaError)> {
         // TODO calculate idle cycles? see esp32_queue_tdi_idle() in openocd
-        let idle_cycles = 1;
+        let idle_cycles = 100;
 
         // Setup the number of idle cycles between JTAG accesses
         probe.set_idle_cycles(idle_cycles);
+
+        // Always 5 bits for now
+        probe.set_ir_len(5);
 
         let mut x = Self {
             probe,
@@ -81,12 +84,16 @@ impl Xdm {
             return Err((x.free(), e.into()));
         }
 
-        std::thread::sleep(std::time::Duration::from_secs(1)); // TODO remove this
+        let status = x.status().unwrap();
+        log::info!("DSR: {:032b}", status);
 
         // enable the debug module
         if let Err(e) = x.dbg_write(NARADR_DCRSET, 1) {
             return Err((x.free(), e.into()));
         }
+
+        let status = x.status().unwrap();
+        log::info!("DSR: {:032b}", status);
 
         // read the device_id
         let device_id = match x.dbg_read(NARADR_OCDID) {
@@ -97,7 +104,7 @@ impl Xdm {
         let status = x.status().unwrap();
         log::info!("DSR: {:032b}", status);
 
-        log::info!("Found Xtensa device with OCDID: 0x{:08X}", device_id);
+        log::info!("Found Xtensa device with OCDID: 0x{:08X} - {:032b}", device_id, device_id);
         x.device_id = device_id;
 
         Ok(x)
@@ -109,7 +116,7 @@ impl Xdm {
 
         // TODO check response for error
         let res = self.probe.write_register(DEBUG_ADDR, &[regdata], 8)?;
-        log::info!("dbg_read setup response: {:?}", res);
+        log::info!("dbg_read setup response: {:08b}", res[0] & 0b00000011);
 
         let res = self.probe.read_register(DEBUG_ADDR, XDM_REGISTER_WIDTH)?;
 
@@ -124,7 +131,7 @@ impl Xdm {
 
         // TODO check error in response
         let res = self.probe.write_register(DEBUG_ADDR, &[regdata], 8)?;
-        log::info!("write setup response: {:?}", res);
+        log::info!("dbg_write setup response: {:08b}", res[0] & 0b00000011);
 
         let res =
             self.probe
@@ -138,7 +145,7 @@ impl Xdm {
     fn pwr_write(&mut self, dev: PowerDevice, value: u8) -> Result<u8, DebugProbeError> {
         let res = self.probe.write_register(dev as u32, &[value], 8)?;
 
-        log::info!("pwr_write response: {:?}", res);
+        log::info!("pwr_write response: {:08b}", res[0] & 0b00000011);
 
         Ok(res[0])
     }
@@ -146,7 +153,7 @@ impl Xdm {
     fn pwr_read(&mut self, dev: PowerDevice) -> Result<u8, DebugProbeError> {
         let res = self.probe.read_register(dev as u32, 8)?;
 
-        log::info!("pwr_write response: {:?}", res);
+        log::info!("pwr_read response: {:08b}", res[0] & 0b00000011);
 
         Ok(res[0])
     }

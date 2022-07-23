@@ -122,16 +122,20 @@ impl JLink {
 
         let mut response = self.handle.jtag_io(tms, tdi)?;
 
-        log::trace!("Response: {:?}", response);
+        log::info!("Response: {:?}", response);
 
-        let _remainder = response.split_off(tms_enter_shift.len());
+        let _remainder = response.split_off(tms_enter_shift.len() + 1);
+
+        log::info!("Response After split: {:?}", response);
 
         let mut remaining_bits = register_bits;
 
         let mut result = Vec::new();
 
         while remaining_bits >= 8 {
-            let byte = bits_to_byte(response.split_off(8)) as u8;
+            let bits = response.split_off(8);
+            log::info!("Rem bits: {:?}", bits);
+            let byte = bits_to_byte(bits) as u8;
             result.push(byte);
             remaining_bits -= 8;
         }
@@ -744,7 +748,7 @@ impl SwoAccess for JLink {
 pub(crate) fn bits_to_byte(bits: impl IntoIterator<Item = bool>) -> u32 {
     let mut bit_val = 0u32;
 
-    for (index, bit) in bits.into_iter().take(32).enumerate() {
+    for (index, bit) in bits.into_iter().enumerate() {
         if bit {
             bit_val |= 1 << index;
         }
