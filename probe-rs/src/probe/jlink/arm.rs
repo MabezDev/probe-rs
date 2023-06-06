@@ -1655,6 +1655,10 @@ mod test {
 
             Ok(ret.to_le_bytes()[..5].to_vec())
         }
+
+        fn scan(&mut self) -> Result<Vec<crate::probe::JtagChainItem>, DebugProbeError> {
+            todo!()
+        } 
     }
 
     impl RawProtocolIo for MockJaylink {

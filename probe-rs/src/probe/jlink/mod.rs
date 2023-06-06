@@ -677,6 +677,10 @@ impl JTAGAccess for JLink {
     fn get_idle_cycles(&self) -> u8 {
         self.jtag_idle_cycles
     }
+
+    fn scan(&mut self) -> Result<Vec<super::JtagChainItem>, DebugProbeError> {
+        todo!()
+    }    
 }
 
 impl DapProbe for JLink {}

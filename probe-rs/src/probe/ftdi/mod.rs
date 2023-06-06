@@ -20,22 +20,7 @@ mod commands;
 
 use self::commands::{JtagCommand, WriteRegisterCommand};
 
-use super::{BatchExecutionError, CommandResult};
-
-#[derive(Debug)]
-struct JtagChainItem {
-    idcode: u32,
-    irlen: usize,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(super) struct ChainParams {
-    irpre: usize,
-    irpost: usize,
-    drpre: usize,
-    drpost: usize,
-    irlen: usize,
-}
+use super::{BatchExecutionError, CommandResult, ChainParams, JtagChainItem};
 
 #[derive(Debug)]
 pub struct JtagAdapter {
@@ -479,6 +464,7 @@ impl DebugProbe for FtdiProbe {
             .adapter
             .scan()
             .map_err(|e| DebugProbeError::ProbeSpecific(Box::new(e)))?;
+        tracing::info!("TAPS: {:?}", taps);
         if taps.is_empty() {
             tracing::warn!("no JTAG taps detected");
             return Err(DebugProbeError::TargetNotFound);
@@ -749,6 +735,10 @@ impl JTAGAccess for FtdiProbe {
 
     fn set_ir_len(&mut self, _len: u32) {
         // The FTDI implementation automatically sets this, so need need to act on this data
+    }
+
+    fn scan(&mut self) -> Result<Vec<JtagChainItem>, DebugProbeError> {
+        self.adapter.scan().map_err(|e| DebugProbeError::Other(e.into()))
     }
 }
 

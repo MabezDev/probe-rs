@@ -857,6 +857,23 @@ pub trait JTAGAccess: DebugProbe {
 
         Ok(results)
     }
+
+    fn scan(&mut self) -> Result<Vec<JtagChainItem>, DebugProbeError>;
+}
+
+#[derive(Debug)]
+pub struct JtagChainItem {
+    idcode: u32,
+    irlen: usize,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(super) struct ChainParams {
+    irpre: usize,
+    irpost: usize,
+    drpre: usize,
+    drpost: usize,
+    irlen: usize,
 }
 
 pub type DeferredResultIndex = usize;

@@ -3,7 +3,7 @@ mod protocol;
 use std::{
     convert::TryInto,
     iter,
-    time::{Duration, Instant},
+    time::{Duration, Instant}
 };
 
 use crate::{
@@ -20,7 +20,7 @@ use crate::{
 
 use self::protocol::ProtocolHandler;
 
-use super::JTAGAccess;
+use super::{JTAGAccess, JtagChainItem};
 
 pub use protocol::list_espjtag_devices;
 
@@ -58,7 +58,7 @@ impl EspUsbJtag {
         tms.extend(tms_shift_out_value);
         tms.extend_from_slice(&tms_enter_idle);
 
-        let tdi = iter::repeat(false).take(tms.len() + self.idle_cycles() as usize);
+        let tdi = iter::repeat(true).take(tms.len()).chain(iter::repeat(false).take(self.idle_cycles() as usize));
 
         // We have to stay in the idle cycle a bit
         tms.extend(iter::repeat(false).take(self.idle_cycles() as usize));
@@ -258,6 +258,55 @@ impl EspUsbJtag {
 
         Ok(result)
     }
+
+    // TODO in the future this should return more than one idcode if more is available
+    fn reset_scan(&mut self) -> Result<Vec<u32>, super::DebugProbeError> {
+        let max_chain = 8;
+
+        tracing::debug!("Resetting JTAG chain using trst");
+        // TODO this isn't actually needed, we should only do this when AttachUnderReset it supplied
+        // self.protocol.set_reset(true, true)?;
+        // self.protocol.set_reset(false, false)?;
+
+        tracing::debug!("Resetting JTAG chain by setting tms high for 5 bits");
+
+        // Reset JTAG chain (5 times TMS high), and enter idle state afterwards
+        let tms = vec![true, true, true, true, true, false];
+        let tdi = iter::repeat(false).take(6);
+
+        let response: Vec<_> = self.protocol.jtag_io(tms, tdi, false)?.collect();
+
+        tracing::debug!("Response to reset: {:?}", response);
+
+        // try to read the idcode until we have some non-zero bytes
+        let start = Instant::now();
+        let idcodes = {
+            let mut idcodes = Vec::with_capacity(max_chain);
+            let idcode = 'first: loop {
+                let idcode_bytes = self.write_dr(&(0xFFFFFFFFu32).to_le_bytes()[..],32)?;
+                if idcode_bytes.iter().any(|&x| x != 0)
+                    || Instant::now().duration_since(start) > Duration::from_secs(1)
+                {
+                    break 'first u32::from_le_bytes((&idcode_bytes[..]).try_into().unwrap());
+                }
+            };
+            tracing::info!("FIRST ID CODE: {:?}", idcode);
+            idcodes.push(idcode);
+            for _ in 0..(max_chain - 1) {
+                let idcode = self.write_dr(&(0xFFFFFFFFu32).to_le_bytes()[..],32)?;
+                tracing::info!("{:?}", idcode);
+                idcodes.push(u32::from_le_bytes(
+                    (&idcode[..]).try_into().unwrap(),
+                ))
+            }
+
+            idcodes
+        };
+
+        tracing::info!("Chain scan result: {:?}", idcodes);
+
+        Ok(idcodes)
+    }
 }
 
 impl JTAGAccess for EspUsbJtag {
@@ -319,6 +368,16 @@ impl JTAGAccess for EspUsbJtag {
     fn get_idle_cycles(&self) -> u8 {
         self.jtag_idle_cycles
     }
+
+    fn scan(&mut self) -> Result<Vec<super::JtagChainItem>, DebugProbeError> {
+        let chain = self.reset_scan()?;
+        Ok(chain.iter()
+            .map(|&i| JtagChainItem {
+                idcode: i,
+                irlen: 5, // TODO this is currently fixed to 5bits
+            })
+            .collect())
+    }
 }
 
 impl DebugProbe for EspUsbJtag {
@@ -364,36 +423,10 @@ impl DebugProbe for EspUsbJtag {
     fn attach(&mut self) -> Result<(), super::DebugProbeError> {
         tracing::debug!("Attaching to ESP USB JTAG");
 
-        // TODO: Maybe can be left in protocol altogether.
-
-        // try some JTAG stuff
-
-        tracing::debug!("Resetting JTAG chain using trst");
-        self.protocol.set_reset(true, true)?;
-        self.protocol.set_reset(false, false)?;
-
-        tracing::debug!("Resetting JTAG chain by setting tms high for 5 bits");
-
-        // Reset JTAG chain (5 times TMS high), and enter idle state afterwards
-        let tms = vec![true, true, true, true, true, false];
-        let tdi = iter::repeat(false).take(6);
-
-        let response: Vec<_> = self.protocol.jtag_io(tms, tdi, false)?.collect();
-
-        tracing::debug!("Response to reset: {:?}", response);
-
-        // try to read the idcode until we have some non-zero bytes
-        let start = Instant::now();
-        let idcode = loop {
-            let idcode_bytes = self.read_dr(32)?;
-            if idcode_bytes.iter().any(|&x| x != 0)
-                || Instant::now().duration_since(start) > Duration::from_secs(1)
-            {
-                break u32::from_le_bytes((&idcode_bytes[..]).try_into().unwrap());
-            }
-        };
-
-        tracing::info!("JTAG IDCODE: {:#010x}", idcode);
+        let chain = self.reset_scan()?;
+        // TODO currently only attaching to first one in the chain
+        tracing::info!("JTAG IDCODE: {:#010x}", chain[0]);
+        // TODO code required to attach to a specific target
 
         Ok(())
     }
