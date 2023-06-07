@@ -83,6 +83,12 @@ pub enum FileDownloadError {
     /// Reading and decoding the given ELF file has resulted in the given error.
     #[error("Could not read ELF file")]
     Elf(#[from] object::read::Error),
+    /// Espflash format error
+    #[error("Failed to format as esp-idf binary")]
+    Idf(#[from] espflash::error::Error),
+    /// The target doesn't support the idf format
+    #[error("Target {0} does not support the idf format")]
+    IdfUnsupported(String),
     /// No loadable segments were found in the ELF file.
     ///
     /// This is most likely because of a bad linker script.

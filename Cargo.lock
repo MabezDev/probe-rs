@@ -2651,7 +2651,6 @@ dependencies = [
  "svg",
  "thiserror",
  "tracing",
- "xmas-elf",
 ]
 
 [[package]]

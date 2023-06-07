@@ -5,6 +5,7 @@ use probe_rs_target::{
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
 use std::ops::Range;
+use std::str::FromStr;
 
 use super::builder::FlashBuilder;
 use super::{
@@ -118,34 +119,31 @@ impl FlashLoader {
     }
 
     /// Reads the data from the binary file and adds it to the loader without splitting it into flash instructions yet.
-    pub fn load_idf_data<T: Read + Seek>(
+    pub fn load_idf_data<T: Read>(
         &mut self,
         session: &mut Session,
         file: &mut T,
         options: IdfOptions,
     ) -> Result<(), FileDownloadError> {
-        use core::str::FromStr;
-        let chip = espflash::targets::Chip::from_str(&session.target().name)
-            .unwrap() // TODO handle error
+        let target = session.target();
+        let chip = espflash::targets::Chip::from_str(&target.name)
+            .map_err(|_| FileDownloadError::IdfUnsupported(target.name.clone()))?
             .into_target();
 
         let mut buf = Vec::new();
         file.read_to_end(&mut buf)?;
 
-        let elf = xmas_elf::ElfFile::new(&buf).expect("Invalid elf file");
-        let firmware = espflash::elf::ElfFirmwareImage::new(elf);
-        let image = chip
-            .get_flash_image(
-                &firmware,
-                options.bootloader,
-                options.partition_table,
-                None,
-                None,
-                None,
-                None,
-                None,
-            )
-            .unwrap(); // TODO handle error
+        let firmware = espflash::elf::ElfFirmwareImage::try_from(&buf[..])?;
+        let image = chip.get_flash_image(
+            &firmware,
+            options.bootloader,
+            options.partition_table,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )?;
         let parts: Vec<_> = image.flash_segments().collect();
 
         let bootloader = &parts[0];

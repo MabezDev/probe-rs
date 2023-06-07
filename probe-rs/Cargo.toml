@@ -66,7 +66,6 @@ tracing = { version = "0.1.37", features = ["log"] }
 
 espflash = { version = "2.0.0-rc.3", git = "https://github.com/MabezDev/espflash", branch = "new-esp-idf-part" }
 esp-idf-part = { version = "0.4", git = "https://github.com/esp-rs/esp-idf-part" }
-xmas-elf = "0.9.0"
 
 # optional
 hexdump = { version = "0.1.1", optional = true }
