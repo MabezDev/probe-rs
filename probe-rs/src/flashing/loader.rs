@@ -9,6 +9,7 @@ use std::ops::Range;
 use super::builder::FlashBuilder;
 use super::{
     extract_from_elf, BinOptions, DownloadOptions, FileDownloadError, FlashError, Flasher,
+    IdfOptions,
 };
 use crate::memory::MemoryInterface;
 use crate::session::Session;
@@ -112,6 +113,47 @@ impl FlashLoader {
             },
             &buf,
         )?;
+
+        Ok(())
+    }
+
+    /// Reads the data from the binary file and adds it to the loader without splitting it into flash instructions yet.
+    pub fn load_idf_data<T: Read + Seek>(
+        &mut self,
+        file: &mut T,
+        options: IdfOptions,
+    ) -> Result<(), FileDownloadError> {
+        use core::str::FromStr;
+        let chip = espflash::targets::Chip::from_str(&options.chip)
+            .unwrap() // TODO handle error
+            .into_target();
+
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)?;
+
+        let elf = xmas_elf::ElfFile::new(&buf).expect("Invalid elf file");
+        let firmware = espflash::elf::ElfFirmwareImage::new(elf);
+        let image = chip
+            .get_flash_image(
+                &firmware,
+                options.bootloader,
+                options.partition_table,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap(); // TODO handle error
+        let parts: Vec<_> = image.flash_segments().collect();
+
+        let bootloader = &parts[0];
+        let partition_table = &parts[1];
+        let app = &parts[2];
+
+        self.add_data(bootloader.addr as u64, &bootloader.data)?;
+        self.add_data(partition_table.addr as u64, &partition_table.data)?;
+        self.add_data(app.addr as u64, &app.data)?;
 
         Ok(())
     }

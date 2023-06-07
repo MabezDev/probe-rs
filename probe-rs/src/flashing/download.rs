@@ -18,6 +18,17 @@ pub struct BinOptions {
     pub skip: u32,
 }
 
+/// Extended options for flashing a ESP-IDFformat file.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone, Default)]
+pub struct IdfOptions {
+    /// Which chip to flash
+    pub chip: String,
+    /// The bootloader
+    pub bootloader: Option<Vec<u8>>,
+    /// The partition table
+    pub partition_table: Option<esp_idf_part::PartitionTable>,
+}
+
 /// A finite list of all the available binary formats probe-rs understands.
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub enum Format {
@@ -29,6 +40,9 @@ pub enum Format {
     Hex,
     /// Marks a file in the [ELF](https://en.wikipedia.org/wiki/Executable_and_Linkable_Format) format.
     Elf,
+    /// Marks a file in the [ESP-IDF bootloader](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/system/app_image_format.html#app-image-structures) format.
+    /// Use [IdfOptions] to configure flashing.
+    Idf(IdfOptions),
 }
 
 impl FromStr for Format {
@@ -40,6 +54,7 @@ impl FromStr for Format {
                 base_address: None,
                 skip: 0,
             })),
+            "idf" | "esp-idf" => Ok(Format::Idf(Default::default())),
             "hex" | "ihex" | "intelhex" => Ok(Format::Hex),
             "elf" => Ok(Format::Elf),
             _ => Err(format!("Format '{s}' is unknown.")),
@@ -159,6 +174,7 @@ pub fn download_file_with_options<P: AsRef<Path>>(
         Format::Bin(options) => loader.load_bin_data(&mut file, options),
         Format::Elf => loader.load_elf_data(&mut file),
         Format::Hex => loader.load_hex_data(&mut file),
+        Format::Idf(options) => loader.load_idf_data(&mut file, options),
     }?;
 
     loader
