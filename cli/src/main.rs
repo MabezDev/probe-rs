@@ -14,8 +14,8 @@ use debugger::CliState;
 use probe_rs::{
     architecture::arm::{component::TraceSink, swo::SwoConfig},
     debug::debug_info::DebugInfo,
-    flashing::{erase_all, BinOptions, FileDownloadError, Format},
-    MemoryInterface, Probe,
+    flashing::{erase_all, BinOptions, FileDownloadError, Format, IdfOptions},
+    MemoryInterface, Probe, Session,
 };
 
 use probe_rs_cli_util::{
@@ -126,17 +126,6 @@ enum Subcommand {
         #[clap(flatten)]
         common: ProbeOptions,
 
-        /// Format of the file to be downloaded to the flash. Possible values are case-insensitive.
-        #[clap(value_enum, ignore_case = true, default_value = "elf", long)]
-        format: DownloadFileType,
-
-        /// The address in memory where the binary will be put at. This is only considered when `bin` is selected as the format.
-        #[clap(long, value_parser = parse_u64)]
-        base_address: Option<u64>,
-        /// The number of bytes to skip at the start of the binary file. This is only considered when `bin` is selected as the format.
-        #[clap(long, value_parser = parse_u32)]
-        skip_bytes: Option<u32>,
-
         /// The path to the file to be downloaded to the flash
         path: String,
 
@@ -151,6 +140,9 @@ enum Subcommand {
         /// Disable double-buffering when downloading flash.  If downloading times out, try this option.
         #[clap(long = "disable-double-buffering")]
         disable_double_buffering: bool,
+
+        #[clap(flatten)]
+        format_options: FormatOptions,
     },
     /// Erase all nonvolatile memory of attached target
     Erase {
@@ -173,6 +165,9 @@ enum Subcommand {
         /// Disable double-buffering when downloading flash.  If downloading times out, try this option.
         #[clap(long = "disable-double-buffering")]
         disable_double_buffering: bool,
+
+        #[clap(flatten)]
+        format_options: FormatOptions,
     },
     /// Trace a memory location on the target
     #[clap(name = "trace")]
@@ -232,6 +227,57 @@ enum Chip {
 pub(crate) struct CoreOptions {
     #[clap(long, default_value = "0")]
     core: usize,
+}
+
+#[derive(clap::Parser)]
+pub(crate) struct FormatOptions {
+    #[clap(value_enum, ignore_case = true, default_value = "elf", long)]
+    format: Format,
+    /// The address in memory where the binary will be put at.
+    #[clap(long)]
+    pub base_address: Option<u64>,
+    /// The number of bytes to skip at the start of the binary file.
+    #[clap(long, default_value = "0")]
+    pub skip: u32,
+    /// The idf bootloader path
+    #[clap(long)]
+    pub bootloader: Option<PathBuf>,
+    /// The idf partition table path
+    #[clap(long)]
+    pub partition_table: Option<PathBuf>,
+}
+
+impl FormatOptions {
+    pub fn into_format(self) -> anyhow::Result<Format> {
+        Ok(match self.format {
+            Format::Bin(_) => Format::Bin(BinOptions {
+                base_address: self.base_address,
+                skip: self.skip,
+            }),
+            Format::Hex => Format::Hex,
+            Format::Elf => Format::Elf,
+            Format::Idf(_) => {
+                let bootloader = if let Some(path) = self.bootloader {
+                    Some(std::fs::read(path)?)
+                } else {
+                    None
+                };
+
+                let partition_table = if let Some(path) = self.partition_table {
+                    Some(esp_idf_part::PartitionTable::try_from(std::fs::read(
+                        path,
+                    )?)?)
+                } else {
+                    None
+                };
+
+                Format::Idf(IdfOptions {
+                    bootloader,
+                    partition_table,
+                })
+            }
+        })
+    }
 }
 
 #[derive(clap::Subcommand)]
@@ -341,32 +387,33 @@ fn main() -> Result<()> {
         } => dump_memory(&shared, &common, loc, words),
         Subcommand::Download {
             common,
-            format,
-            base_address,
-            skip_bytes,
+            format_options,
             path,
             chip_erase,
             disable_progressbars,
             disable_double_buffering,
         } => download_program_fast(
             common,
-            format.into(base_address, skip_bytes),
+            format_options.into_format()?,
             &path,
             chip_erase,
             disable_progressbars,
             disable_double_buffering,
-        ),
+        )
+        .map(|_| ()),
         Subcommand::Run {
             common,
             path,
             chip_erase,
             disable_double_buffering,
+            format_options,
         } => run::run(
             common,
             &path,
             chip_erase,
             disable_double_buffering,
             utc_offset,
+            format_options.into_format()?,
         ),
         Subcommand::Erase { common } => erase(&common),
         Subcommand::Trace {
@@ -459,7 +506,7 @@ fn download_program_fast(
     do_chip_erase: bool,
     disable_progressbars: bool,
     disable_double_buffering: bool,
-) -> Result<()> {
+) -> Result<Session> {
     let mut session = common.simple_attach()?;
 
     let mut file = match File::open(path) {
@@ -473,6 +520,7 @@ fn download_program_fast(
         Format::Bin(options) => loader.load_bin_data(&mut file, options),
         Format::Elf => loader.load_elf_data(&mut file),
         Format::Hex => loader.load_hex_data(&mut file),
+        Format::Idf(options) => loader.load_idf_data(&mut session, &mut file, options),
     }?;
 
     run_flash_download(
@@ -496,7 +544,7 @@ fn download_program_fast(
         do_chip_erase,
     )?;
 
-    Ok(())
+    Ok(session)
 }
 
 fn erase(common: &ProbeOptions) -> Result<()> {
@@ -614,26 +662,6 @@ fn debug(shared_options: &CoreOptions, common: &ProbeOptions, exe: Option<PathBu
     }
 
     Ok(())
-}
-
-#[derive(clap::ValueEnum, Debug, Clone, Copy)]
-enum DownloadFileType {
-    Elf,
-    Hex,
-    Bin,
-}
-
-impl DownloadFileType {
-    fn into(self, base_address: Option<u64>, skip: Option<u32>) -> Format {
-        match self {
-            DownloadFileType::Elf => Format::Elf,
-            DownloadFileType::Hex => Format::Hex,
-            DownloadFileType::Bin => Format::Bin(BinOptions {
-                base_address,
-                skip: skip.unwrap_or(0),
-            }),
-        }
-    }
 }
 
 fn parse_u32(input: &str) -> Result<u32, ParseIntError> {

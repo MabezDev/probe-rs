@@ -120,11 +120,12 @@ impl FlashLoader {
     /// Reads the data from the binary file and adds it to the loader without splitting it into flash instructions yet.
     pub fn load_idf_data<T: Read + Seek>(
         &mut self,
+        session: &mut Session,
         file: &mut T,
         options: IdfOptions,
     ) -> Result<(), FileDownloadError> {
         use core::str::FromStr;
-        let chip = espflash::targets::Chip::from_str(&options.chip)
+        let chip = espflash::targets::Chip::from_str(&session.target().name)
             .unwrap() // TODO handle error
             .into_target();
 

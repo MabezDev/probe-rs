@@ -2661,6 +2661,7 @@ dependencies = [
  "capstone",
  "colored",
  "directories 5.0.0",
+ "esp-idf-part",
  "gdb-server",
  "git-version",
  "ihex",

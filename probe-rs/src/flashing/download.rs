@@ -21,8 +21,6 @@ pub struct BinOptions {
 /// Extended options for flashing a ESP-IDFformat file.
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone, Default)]
 pub struct IdfOptions {
-    /// Which chip to flash
-    pub chip: String,
     /// The bootloader
     pub bootloader: Option<Vec<u8>>,
     /// The partition table
@@ -174,7 +172,7 @@ pub fn download_file_with_options<P: AsRef<Path>>(
         Format::Bin(options) => loader.load_bin_data(&mut file, options),
         Format::Elf => loader.load_elf_data(&mut file),
         Format::Hex => loader.load_hex_data(&mut file),
-        Format::Idf(options) => loader.load_idf_data(&mut file, options),
+        Format::Idf(options) => loader.load_idf_data(session, &mut file, options),
     }?;
 
     loader
