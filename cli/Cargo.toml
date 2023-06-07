@@ -52,6 +52,8 @@ time = { version = "0.3", default-features = false, features = [
     "large-dates",
     "macros",
 ] }
+addr2line = "0.20.0"
+strum = { version = "0.24.1", features = ["derive"] }
 git-version = "0.3.5"
 
 [build-dependencies]

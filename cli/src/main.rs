@@ -3,6 +3,7 @@ mod common;
 mod debugger;
 mod gdb;
 mod info;
+mod profile;
 mod run;
 mod trace;
 
@@ -10,6 +11,7 @@ include!(concat!(env!("OUT_DIR"), "/meta.rs"));
 
 use benchmark::{benchmark, BenchmarkOptions};
 use debugger::CliState;
+use profile::{profile, ProfileOptions};
 
 use probe_rs::{
     architecture::arm::{component::TraceSink, swo::SwoConfig},
@@ -211,6 +213,14 @@ enum Subcommand {
         #[clap(flatten)]
         options: BenchmarkOptions,
     },
+    Profile {
+        #[clap(flatten)]
+        common: ProbeOptions,
+        /// The path to the ELF file to flash and profile
+        path: String,
+        #[clap(flatten)]
+        profile_opts: ProfileOptions,
+    },
 }
 
 #[derive(clap::Parser)]
@@ -394,6 +404,11 @@ fn main() -> Result<()> {
         Subcommand::Chip(Chip::List) => print_families(io::stdout()).map_err(Into::into),
         Subcommand::Chip(Chip::Info { name }) => print_chip_info(name, io::stdout()),
         Subcommand::Benchmark { common, options } => benchmark(common, options),
+        Subcommand::Profile {
+            common,
+            path,
+            profile_opts,
+        } => profile(common, &path, profile_opts),
     };
 
     tracing::info!("Wrote log to {:?}", log_path);
