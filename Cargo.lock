@@ -1192,6 +1192,7 @@ dependencies = [
 [[package]]
 name = "esp-idf-part"
 version = "0.4.0"
+source = "git+https://github.com/esp-rs/esp-idf-part#5b918b6988c546eae64b8e2fe827136002bc1544"
 dependencies = [
  "csv",
  "deku",
@@ -1208,6 +1209,7 @@ dependencies = [
 [[package]]
 name = "espflash"
 version = "2.0.0-rc.4"
+source = "git+https://github.com/MabezDev/espflash?branch=new-esp-idf-part#39e003a4f557fd61cc9cdbce60f4dd8a9a03be24"
 dependencies = [
  "addr2line 0.20.0",
  "base64 0.21.2",
