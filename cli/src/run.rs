@@ -17,7 +17,14 @@ pub fn run(
     timestamp_offset: UtcOffset,
     format: Format,
 ) -> Result<()> {
-    let mut session = download_program_fast(common, format, path, chip_erase, false, disable_double_buffering)?;
+    let mut session = download_program_fast(
+        common,
+        format,
+        path,
+        chip_erase,
+        false,
+        disable_double_buffering,
+    )?;
 
     let rtt_config = rtt::RttConfig::default();
 
