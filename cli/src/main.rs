@@ -241,10 +241,10 @@ pub(crate) struct FormatOptions {
     pub skip: u32,
     /// The idf bootloader path
     #[clap(long)]
-    pub bootloader: Option<PathBuf>,
+    pub idf_bootloader: Option<PathBuf>,
     /// The idf partition table path
     #[clap(long)]
-    pub partition_table: Option<PathBuf>,
+    pub idf_partition_table: Option<PathBuf>,
 }
 
 impl FormatOptions {
@@ -257,13 +257,13 @@ impl FormatOptions {
             Format::Hex => Format::Hex,
             Format::Elf => Format::Elf,
             Format::Idf(_) => {
-                let bootloader = if let Some(path) = self.bootloader {
+                let bootloader = if let Some(path) = self.idf_bootloader {
                     Some(std::fs::read(path)?)
                 } else {
                     None
                 };
 
-                let partition_table = if let Some(path) = self.partition_table {
+                let partition_table = if let Some(path) = self.idf_partition_table {
                     Some(esp_idf_part::PartitionTable::try_from(std::fs::read(
                         path,
                     )?)?)

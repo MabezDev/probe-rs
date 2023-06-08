@@ -18,7 +18,7 @@ pub struct BinOptions {
     pub skip: u32,
 }
 
-/// Extended options for flashing a ESP-IDFformat file.
+/// Extended options for flashing a ESP-IDF format file.
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone, Default)]
 pub struct IdfOptions {
     /// The bootloader
@@ -86,8 +86,8 @@ pub enum FileDownloadError {
     /// Espflash format error
     #[error("Failed to format as esp-idf binary")]
     Idf(#[from] espflash::error::Error),
-    /// The target doesn't support the idf format
-    #[error("Target {0} does not support the idf format")]
+    /// The target doesn't support the esp-idf format
+    #[error("Target {0} does not support the esp-idf format")]
     IdfUnsupported(String),
     /// No loadable segments were found in the ELF file.
     ///

@@ -118,7 +118,10 @@ impl FlashLoader {
         Ok(())
     }
 
-    /// Reads the data from the binary file and adds it to the loader without splitting it into flash instructions yet.
+    /// Loads an esp-idf application into the loader by converting the main application to the esp-idf bootloader format,
+    /// appending it to the loader along with the bootloader and partition table.
+    /// 
+    /// This does not create and flash loader instructions yet.
     pub fn load_idf_data<T: Read>(
         &mut self,
         session: &mut Session,
