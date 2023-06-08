@@ -149,13 +149,9 @@ impl FlashLoader {
         )?;
         let parts: Vec<_> = image.flash_segments().collect();
 
-        let bootloader = &parts[0];
-        let partition_table = &parts[1];
-        let app = &parts[2];
-
-        self.add_data(bootloader.addr as u64, &bootloader.data)?;
-        self.add_data(partition_table.addr as u64, &partition_table.data)?;
-        self.add_data(app.addr as u64, &app.data)?;
+        for data in parts {
+            self.add_data(data.addr.into(), &data.data)?;
+        }
 
         Ok(())
     }
