@@ -882,6 +882,7 @@ impl<'p> ActiveFlasher<'p, Program> {
             buffer_number, self.flash_algorithm.page_buffers.len()
         );
 
+        let t1 = std::time::Instant::now();
         self.call_function(
             &Registers {
                 pc: into_reg(self.flash_algorithm.pc_program_page)?,
@@ -896,6 +897,11 @@ impl<'p> ActiveFlasher<'p, Program> {
             page_address: address,
             source: Box::new(error),
         })?;
+        tracing::info!(
+            "Took {:?} to write {} byte page to flash",
+            t1.elapsed(),
+            self.flash_algorithm.flash_properties.page_size
+        );
 
         Ok(())
     }

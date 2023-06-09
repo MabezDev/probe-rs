@@ -33,8 +33,6 @@ pub(crate) struct EspUsbJtag {
     jtag_idle_cycles: u8,
 
     current_ir_reg: u32,
-
-    speed_khz: u32,
 }
 
 impl EspUsbJtag {
@@ -331,7 +329,6 @@ impl DebugProbe for EspUsbJtag {
             protocol,
             jtag_idle_cycles: 0,
             current_ir_reg: 1,
-            speed_khz: 0,
         }))
     }
 
@@ -352,13 +349,11 @@ impl DebugProbe for EspUsbJtag {
     }
 
     fn speed_khz(&self) -> u32 {
-        self.speed_khz
+        self.protocol.speed_khz
     }
 
-    fn set_speed(&mut self, speed_khz: u32) -> Result<u32, DebugProbeError> {
-        // TODO:
-
-        Ok(speed_khz)
+    fn set_speed(&mut self, _speed_khz: u32) -> Result<u32, DebugProbeError> {
+        Ok(self.protocol.speed_khz)
     }
 
     fn attach(&mut self) -> Result<(), super::DebugProbeError> {

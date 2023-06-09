@@ -43,6 +43,10 @@ pub(super) struct ProtocolHandler {
 
     ep_out: u8,
     ep_in: u8,
+
+    pub(crate) speed_khz: u32,
+    div_min: u16,
+    div_max: u16,
 }
 
 impl Debug for ProtocolHandler {
@@ -163,10 +167,9 @@ impl ProtocolHandler {
             USB_TIMEOUT,
         )?;
 
-        // TODO:
-        // let mut base_speed_khz = 1000;
-        // let mut div_min = 1;
-        // let mut div_max = 1;
+        let mut base_speed_khz = 1000;
+        let mut div_min = 1;
+        let mut div_max = 1;
 
         let protocol_version = buffer[0];
         tracing::debug!("{:?}", &buffer[..20]);
@@ -185,10 +188,10 @@ impl ProtocolHandler {
             let length = buffer[p + 1];
 
             if typ == JTAG_PROTOCOL_CAPABILITIES_SPEED_APB_TYPE {
-                // TODO:
-                // base_speed_khz = (((buffer[p + 3] as u16) << 8) | buffer[p + 2] as u16) * 10 / 2;
-                // div_min = ((buffer[p + 5] as u16) << 8) | buffer[p + 4] as u16;
-                // div_max = ((buffer[p + 7] as u16) << 8) | buffer[p + 6] as u16;
+                base_speed_khz = ((((buffer[p + 2] as u16 | ((buffer[p + 3] as u16) << 8)) as u64) * 10) / 2) as u32;
+                div_min = ((buffer[p + 5] as u16) << 8) | buffer[p + 4] as u16;
+                div_max = ((buffer[p + 7] as u16) << 8) | buffer[p + 6] as u16;
+                tracing::info!("Found ESP USB JTAG - using speed: {base_speed_khz}khz. Available dividers: {div_min}/{div_max}");
             } else {
                 tracing::warn!("Unknown capabilities type {:01X?}", typ);
             }
@@ -206,6 +209,9 @@ impl ProtocolHandler {
             command_queue: None,
             output_buffer: Vec::new(),
             input_buffer: Vec::new(),
+            speed_khz: base_speed_khz,
+            div_min,
+            div_max,
             // The following expects are okay as we check that the values we call them on are `Some`.
             ep_out: ep_out.expect("This is a bug. Please report it."),
             ep_in: ep_in.expect("This is a bug. Please report it."),
