@@ -220,7 +220,6 @@ impl ProtocolHandler {
         tdi: impl IntoIterator<Item = bool>,
         cap: bool,
     ) -> Result<OwnedBitIter, DebugProbeError> {
-        self.input_buffers.clear();
         self.jtag_io_async(tms, tdi, cap)?;
         self.flush()
     }
@@ -296,13 +295,15 @@ impl ProtocolHandler {
             self.receive_buffer()?;
         }
 
-        tracing::warn!("Recieved {} buffers, about to chain them.", self.input_buffers.len());
-
-        Ok(self
+        let iter = self
             .input_buffers
             .iter()
             .flat_map(|it| it.clone())
-            .collect())
+            .collect();
+
+        self.input_buffers.clear();
+
+        Ok(iter)
     }
 
     /// Writes a command one or multiple times into the raw buffer we send to the USB EP later
@@ -361,7 +362,7 @@ impl ProtocolHandler {
 
     /// Sends the commands stored in the output buffer to the USB EP.
     fn send_buffer(&mut self) -> Result<(), DebugProbeError> {
-        tracing::info!("Send buffer: [{}]", self.output_buffer.len());
+        tracing::trace!("Send buffer: [{}]", self.output_buffer.len());
 
         let commands = self
             .output_buffer
@@ -401,8 +402,6 @@ impl ProtocolHandler {
     /// Tries to receive pending in bits from the USB EP.
     fn receive_buffer(&mut self) -> Result<(), DebugProbeError> {
         let count = ((self.pending_in_bits + 7) / 8).min(IN_EP_BUFFER_SIZE);
-        // tracing::info!("In recieve [{}], expecting {} bytes", self.input_buffer.len(), count);
-
         let mut incoming = vec![0; count];
 
         if count == 0 {
@@ -422,7 +421,7 @@ impl ProtocolHandler {
             return Ok(());
         }
 
-        tracing::info!("Received {} bytes.", read_bytes);
+        tracing::trace!("Received {} bytes.", read_bytes);
 
         if read_bytes != count {
             return Err(DebugProbeError::ProbeSpecific(
@@ -582,7 +581,6 @@ impl OwnedBitIter {
             total_bits,
             slice.len()
         );
-        tracing::info!("Creating OwnedBitIter from new");
         let mut buf = VecDeque::new();
         buf.extend(slice);
         Self {
@@ -598,7 +596,11 @@ impl OwnedBitIter {
     pub fn split_off(&mut self, count: usize) -> OwnedBitIter {
         assert!(count <= self.bits_left);
         let next_byte = (count + self.next_bit as usize) / 8;
-        tracing::trace!("Splitting Self [bit index = {}]... Before: {:?}", count, self);
+        tracing::trace!(
+            "Splitting Self [bit index = {}]... Before: {:?}",
+            count,
+            self
+        );
 
         let new_buf = self.buf.split_off(next_byte);
         self.buf.push_back(*new_buf.front().unwrap());
@@ -608,13 +610,13 @@ impl OwnedBitIter {
             bits_left: count,
         };
         tracing::trace!("Other buffer at split off {:?}", other);
-        
+
         // Update self
         self.next_bit = (count as u8 + self.next_bit) % 8;
         self.buf = new_buf;
         self.bits_left -= count;
         tracing::trace!("Self buffer at split off {:?}", self);
-        
+
         other
     }
 }
@@ -623,7 +625,6 @@ impl Iterator for OwnedBitIter {
     type Item = bool;
 
     fn next(&mut self) -> Option<bool> {
-        // tracing::warn!("Bytes rem: {}, bits rem: {}", self.buf.len(), self.bits_left);
         if self.bits_left > 0 {
             let byte = self.buf.iter().next().unwrap();
             let bit = byte & (1 << self.next_bit) != 0;
@@ -694,7 +695,6 @@ impl fmt::Debug for OwnedBitIter {
     }
 }
 
-
 pub(super) fn is_espjtag_device<T: UsbContext>(device: &Device<T>) -> bool {
     // Check the VID/PID.
     if let Ok(descriptor) = device.device_descriptor() {
@@ -745,7 +745,6 @@ pub fn list_espjtag_devices() -> Vec<DebugProbeInfo> {
         })
 }
 
-
 #[cfg(test)]
 mod test {
     use super::*;
@@ -785,5 +784,4 @@ mod test {
         assert!(one.into_iter().eq(a));
         assert!(two.into_iter().eq(x));
     }
-
 }
