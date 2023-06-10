@@ -10,7 +10,7 @@ use crate::{
 const JTAG_PROTOCOL_CAPABILITIES_VERSION: u8 = 1;
 const JTAG_PROTOCOL_CAPABILITIES_SPEED_APB_TYPE: u8 = 1;
 const MAX_COMMAND_REPETITIONS: usize = 1024;
-const OUT_BUFFER_SIZE: usize = OUT_EP_BUFFER_SIZE * 64;
+const OUT_BUFFER_SIZE: usize = OUT_EP_BUFFER_SIZE * 32;
 const OUT_EP_BUFFER_SIZE: usize = 64;
 const IN_EP_BUFFER_SIZE: usize = 64;
 const USB_TIMEOUT: Duration = Duration::from_millis(5000);
@@ -38,8 +38,8 @@ pub(super) struct ProtocolHandler {
     // actually putting the command into the queue `n` times.
     output_buffer: Vec<Command>,
     // A store for all the read bits (from the traget) such that the BitIter the methods return can borrow and iterate over it.
-    input_buffer: Vec<u8>,
-    pending_in_bits: usize,
+    pub(crate) input_buffers: Vec<OwnedBitIter>,
+    pub(crate) pending_in_bits: usize,
 
     ep_out: u8,
     ep_in: u8,
@@ -50,7 +50,7 @@ impl Debug for ProtocolHandler {
         f.debug_struct("ProtocolHandler")
             .field("command_queue", &self.command_queue)
             .field("output_buffer", &self.output_buffer)
-            .field("input_buffer", &self.input_buffer)
+            .field("input_buffers", &self.input_buffers)
             .field("ep_out", &self.ep_out)
             .field("ep_in", &self.ep_in)
             .finish()
@@ -205,7 +205,7 @@ impl ProtocolHandler {
             device_handle,
             command_queue: None,
             output_buffer: Vec::new(),
-            input_buffer: Vec::new(),
+            input_buffers: Vec::new(),
             // The following expects are okay as we check that the values we call them on are `Some`.
             ep_out: ep_out.expect("This is a bug. Please report it."),
             ep_in: ep_in.expect("This is a bug. Please report it."),
@@ -219,7 +219,21 @@ impl ProtocolHandler {
         tms: impl IntoIterator<Item = bool>,
         tdi: impl IntoIterator<Item = bool>,
         cap: bool,
-    ) -> Result<BitIter, DebugProbeError> {
+    ) -> Result<OwnedBitIter, DebugProbeError> {
+        self.jtag_io_async(tms, tdi, cap)?;
+        self.flush()
+    }
+
+    /// Put a bit on TDI and possibly read one from TDO.
+    /// to recieve the bytes from this operations call [`ProtocolHandler::flush`]
+    ///
+    /// Note that if the internal buffer is exceeded bytes will be automatically flushed to usb device
+    pub fn jtag_io_async(
+        &mut self,
+        tms: impl IntoIterator<Item = bool>,
+        tdi: impl IntoIterator<Item = bool>,
+        cap: bool,
+    ) -> Result<(), DebugProbeError> {
         tracing::debug!("JTAG IO! {} ", cap);
         for (tms, tdi) in tms.into_iter().zip(tdi.into_iter()) {
             self.push_command(Command::Clock { cap, tdi, tms })?;
@@ -227,8 +241,7 @@ impl ProtocolHandler {
                 self.pending_in_bits += 1;
             }
         }
-
-        self.flush()
+        Ok(())
     }
 
     /// Sets the two different resets on the target.
@@ -260,7 +273,7 @@ impl ProtocolHandler {
     }
 
     /// Flushes all the pending commands to the JTAG adapter.
-    pub fn flush(&mut self) -> Result<BitIter, DebugProbeError> {
+    pub fn flush(&mut self) -> Result<OwnedBitIter, DebugProbeError> {
         if let Some((command_in_queue, repetitions)) = self.command_queue.take() {
             self.write_stream(command_in_queue, repetitions)?;
         }
@@ -278,7 +291,19 @@ impl ProtocolHandler {
 
         self.send_buffer()?;
 
-        self.receive_buffer()
+        while self.pending_in_bits != 0 {
+            self.receive_buffer()?;
+        }
+
+        let iter = self
+            .input_buffers
+            .iter()
+            .flat_map(|it| it.clone())
+            .collect();
+
+        self.input_buffers.clear();
+
+        Ok(iter)
     }
 
     /// Writes a command one or multiple times into the raw buffer we send to the USB EP later
@@ -319,19 +344,24 @@ impl ProtocolHandler {
         self.output_buffer.push(command);
 
         // If we reach a maximal size of the output buffer, we flush.
-        if self.output_buffer.len() == OUT_BUFFER_SIZE {
+        if self.output_buffer.len() == (OUT_BUFFER_SIZE * 2) {
             self.send_buffer()?;
         }
 
-        // TODO: Bizarre undocumented condition to flush buffer.
+        // Undocumented condition to flush buffer.
         // https://github.com/espressif/openocd-esp32/blob/a28f71785066722f49494e0d946fdc56966dcc0d/src/jtag/drivers/esp_usb_jtag.c#L367
+        if self.output_buffer.len() % (OUT_EP_BUFFER_SIZE * 2) == 0 {
+            if self.pending_in_bits > (64 + 4 - 1) * 8 {
+                self.send_buffer()?;
+            }
+        }
 
         Ok(())
     }
 
     /// Sends the commands stored in the output buffer to the USB EP.
     fn send_buffer(&mut self) -> Result<(), DebugProbeError> {
-        tracing::trace!("Command Buffer: {:?}", self.output_buffer);
+        tracing::trace!("Send buffer: [{}]", self.output_buffer.len());
 
         let commands = self
             .output_buffer
@@ -354,73 +384,57 @@ impl ProtocolHandler {
         // We only clear the output buffer on a successful transmission of all bytes.
         self.output_buffer.clear();
 
-        // TODO: Weird condition again.
         // https://github.com/espressif/openocd-esp32/blob/a28f71785066722f49494e0d946fdc56966dcc0d/src/jtag/drivers/esp_usb_jtag.c#L345
+        loop {
+            if self.pending_in_bits > (64 + 4 - 1) * 8 {
+                self.receive_buffer()?;
+            } else {
+                break;
+            }
+        }
 
         Ok(())
     }
 
     /// Tries to receive pending in bits from the USB EP.
-    fn receive_buffer(&mut self) -> Result<BitIter, DebugProbeError> {
-        self.input_buffer = vec![0; (self.pending_in_bits + 7) / 8];
+    fn receive_buffer(&mut self) -> Result<(), DebugProbeError> {
+        let count = ((self.pending_in_bits + 7) / 8).min(IN_EP_BUFFER_SIZE);
+        let mut incoming = vec![0; count];
 
-        let mut bits_read = 0;
-
-        while bits_read != self.pending_in_bits {
-            let count = ((self.pending_in_bits + 7) / 8).min(IN_EP_BUFFER_SIZE);
-            tracing::trace!("Receiveing {} bytes.", count);
-
-            if count == 0 {
-                return Ok(BitIter::new(&[], 0));
-            }
-
-            let offset = bits_read / 8;
-
-            let mut tries = 3;
-            let mut read_bytes;
-            loop {
-                read_bytes = self
-                    .device_handle
-                    .read_bulk(
-                        self.ep_in,
-                        &mut self.input_buffer[offset..offset + count],
-                        USB_TIMEOUT,
-                    )
-                    .map_err(|e| {
-                        tracing::warn!("Something went wrong in read_bulk {:?}", e);
-                        DebugProbeError::Usb(Some(Box::new(e)))
-                    })?;
-
-                tracing::trace!("Read bytes: {} bytes. On try {}", read_bytes, 4 - tries);
-
-                if read_bytes != 0 {
-                    break;
-                }
-
-                tries -= 1;
-
-                if tries == 0 {
-                    break;
-                }
-            }
-
-            if read_bytes == 0 {
-                // Sometimes the hardware returns 0 bytes instead of NAKing the transaction. Ignore this.
-                return Err(DebugProbeError::ProbeSpecific(
-                    "Transaction not acknowledged.".into(),
-                ));
-            }
-
-            tracing::trace!("Received {} bytes.", count);
-
-            let bits_in_buffer = self.pending_in_bits.min(count * 8);
-            bits_read += bits_in_buffer;
+        if count == 0 {
+            return Ok(());
         }
 
-        tracing::trace!("Read: {:?}, length = {}", self.input_buffer, bits_read);
-        self.pending_in_bits -= bits_read;
+        let read_bytes = self
+            .device_handle
+            .read_bulk(self.ep_in, &mut incoming[..], USB_TIMEOUT)
+            .map_err(|e| {
+                tracing::warn!("Something went wrong in read_bulk {:?} when trying to read {}bytes", e, count);
+                DebugProbeError::Usb(Some(Box::new(e)))
+            })?;
 
-        Ok(BitIter::new(&self.input_buffer, bits_read))
+        if read_bytes == 0 {
+            tracing::trace!("Read 0 bytes from USB");
+            return Ok(());
+        }
+
+        tracing::trace!("Received {} bytes.", read_bytes);
+
+        if read_bytes != count {
+            return Err(DebugProbeError::ProbeSpecific(
+                format!("USB only recieved {} out of {} bytes", read_bytes, count).into(),
+            ));
+        }
+
+        let bits_in_buffer = self.pending_in_bits.min(read_bytes * 8);
+
+        tracing::trace!("Read: {:?}, length = {}", incoming, bits_in_buffer);
+        self.pending_in_bits -= bits_in_buffer;
+
+        self.input_buffers
+            .push(OwnedBitIter::new(&incoming, bits_in_buffer));
+
+        Ok(())
     }
 }
 
@@ -546,6 +560,111 @@ impl fmt::Debug for BitIter<'_> {
     }
 }
 
+use std::collections::VecDeque;
+
+/// An iterator over a received bit stream.
+#[derive(Clone)]
+pub struct OwnedBitIter {
+    buf: VecDeque<u8>,
+    next_bit: u8,
+    bits_left: usize,
+}
+
+impl OwnedBitIter {
+    pub(crate) fn new(slice: &[u8], total_bits: usize) -> Self {
+        assert!(
+            slice.len() * 8 >= total_bits,
+            "cannot pull {} bits out of {} bytes",
+            total_bits,
+            slice.len()
+        );
+        let mut buf = VecDeque::new();
+        buf.extend(slice);
+        Self {
+            buf,
+            next_bit: 0,
+            bits_left: total_bits,
+        }
+    }
+
+    pub fn into_bit_iter<'a>(&'a mut self) -> BitIter<'a> {
+        self.buf.make_contiguous();
+        BitIter::new(&self.buf.as_slices().0, self.bits_left)
+    }
+}
+
+impl Iterator for OwnedBitIter {
+    type Item = bool;
+
+    fn next(&mut self) -> Option<bool> {
+        if self.bits_left > 0 {
+            let byte = self.buf.iter().next().unwrap();
+            let bit = byte & (1 << self.next_bit) != 0;
+            if self.next_bit < 7 {
+                self.next_bit += 1;
+            } else {
+                self.next_bit = 0;
+                self.buf.pop_front();
+            }
+
+            self.bits_left -= 1;
+            Some(bit)
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.bits_left, Some(self.bits_left))
+    }
+}
+
+impl FromIterator<bool> for OwnedBitIter {
+    fn from_iter<T>(iter: T) -> Self
+    where
+        T: IntoIterator<Item = bool>,
+    {
+        let mut buf = VecDeque::new(); // TODO sizehint?
+        let mut total_bits = 0;
+        let mut current_byte = 0;
+        let mut bit_index: u8 = 0;
+        for b in iter {
+            if b {
+                current_byte |= 1 << bit_index
+            }
+            if bit_index < 7 {
+                bit_index += 1;
+            } else {
+                buf.push_back(current_byte);
+                current_byte = 0;
+                bit_index = 0;
+            }
+            total_bits += 1;
+        }
+        if bit_index > 0 {
+            buf.push_back(current_byte);
+        }
+
+        OwnedBitIter {
+            buf,
+            next_bit: 0,
+            bits_left: total_bits,
+        }
+    }
+}
+
+impl ExactSizeIterator for OwnedBitIter {}
+
+impl fmt::Debug for OwnedBitIter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = self
+            .clone()
+            .map(|bit| if bit { '1' } else { '0' })
+            .collect::<String>();
+        write!(f, "BitIter({s})")
+    }
+}
+
 pub(super) fn is_espjtag_device<T: UsbContext>(device: &Device<T>) -> bool {
     // Check the VID/PID.
     if let Ok(descriptor) = device.device_descriptor() {
@@ -594,4 +713,45 @@ pub fn list_espjtag_devices() -> Vec<DebugProbeInfo> {
                 })
                 .collect::<Vec<_>>()
         })
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn owned_collect() {
+        let one = [true, true, true, true, true, true, true, true, true];
+        let two = [true, true, true, true, true, true, true, true, true];
+
+        let bits = one.into_iter().chain(two.into_iter());
+
+        let s = bits
+            .clone()
+            .map(|bit| if bit { '1' } else { '0' })
+            .collect::<String>();
+
+        let x: OwnedBitIter = bits.clone().collect();
+
+        println!("Actual: {}, Owned: {:?} : {:?}", s, x, x.buf);
+
+        assert!(bits.eq(x))
+    }
+
+    #[test]
+    fn owned_split_off() {
+        let one = [true, true, true, true, true, true, true, true, true];
+        let two = [true, true, true, true, true, true, true, true, true];
+
+        let bits = one.into_iter().chain(two.into_iter());
+
+        let mut x: OwnedBitIter = bits.clone().collect();
+
+        println!("Owned: {:?} : {:?} : {}", x, x.buf, x.bits_left);
+
+        let a = x.split_off(9);
+
+        assert!(one.into_iter().eq(a));
+        assert!(two.into_iter().eq(x));
+    }
 }
