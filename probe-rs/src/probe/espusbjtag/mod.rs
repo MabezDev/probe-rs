@@ -18,7 +18,7 @@ use crate::{
     DebugProbe, DebugProbeError, DebugProbeSelector, WireProtocol,
 };
 
-use self::protocol::{ProtocolHandler, OwnedBitIter};
+use self::protocol::{ProtocolHandler, OwnedBitIter, BitIter};
 
 use super::JTAGAccess;
 
@@ -64,6 +64,7 @@ impl EspUsbJtag {
         tms.extend(iter::repeat(false).take(self.idle_cycles() as usize));
 
         let mut response = self.protocol.jtag_io(tms, tdi, true)?;
+        let mut response = response.into_bit_iter();
 
         tracing::trace!("Response: {:?}", response);
 
@@ -185,14 +186,14 @@ impl EspUsbJtag {
     }
 
     fn write_dr(&mut self, data: &[u8], register_bits: usize) -> Result<Vec<u8>, DebugProbeError> {
-        let bits = self.prepare_write_dr(data, register_bits)?;
-        let response = self.protocol.flush()?;
-        tracing::trace!("Response [{bits}][{}][{register_bits}]: {:?}", response.len(), response);
-        
+        self.prepare_write_dr(data, register_bits)?;
+        let mut response = self.protocol.flush()?;
+        let response = response.into_bit_iter();
+
         Self::recieve_write_dr(response, register_bits)
     }
 
-    fn recieve_write_dr(mut response: OwnedBitIter, register_bits: usize) -> Result<Vec<u8>, DebugProbeError> {
+    fn recieve_write_dr(mut response: BitIter, register_bits: usize) -> Result<Vec<u8>, DebugProbeError> {
         let tms_enter_shift = [true, false, false]; // TODO taken from below, make a const in future
         
         let _remainder = response.split_off(tms_enter_shift.len());
@@ -385,8 +386,8 @@ impl JTAGAccess for EspUsbJtag {
         &mut self,
         writes: &[super::JtagWriteCommand],
     ) -> Result<Vec<super::CommandResult>, super::BatchExecutionError> {
-        self.protocol.input_buffers.clear();
         let mut bits = Vec::new();
+        let t1 = std::time::Instant::now();
         tracing::info!("Preparing {} writes...", writes.len());
         for write in writes {
             bits.push(self.prepare_write_register(write.address, &write.data, write.len).unwrap());
@@ -394,7 +395,8 @@ impl JTAGAccess for EspUsbJtag {
 
         tracing::info!("Sending to chip...");
         let mut response = self.protocol.flush().unwrap();
-        tracing::info!("Got responses! Processing...");
+        tracing::info!("Got responses! Took {:?}! Processing...", t1.elapsed());
+        let mut response = response.into_bit_iter();
 
         let mut responses = Vec::new();
 

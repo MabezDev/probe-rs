@@ -39,7 +39,7 @@ pub(super) struct ProtocolHandler {
     output_buffer: Vec<Command>,
     // A store for all the read bits (from the traget) such that the BitIter the methods return can borrow and iterate over it.
     pub(crate) input_buffers: Vec<OwnedBitIter>,
-    pending_in_bits: usize,
+    pub(crate) pending_in_bits: usize,
 
     ep_out: u8,
     ep_in: u8,
@@ -295,15 +295,11 @@ impl ProtocolHandler {
             self.receive_buffer()?;
         }
 
-        tracing::trace!("Flushing complete! Merging buffers...");
-
         let iter = self
             .input_buffers
             .iter()
             .flat_map(|it| it.clone())
             .collect();
-
-        tracing::trace!("Merging complete...");
 
         self.input_buffers.clear();
 
@@ -413,7 +409,7 @@ impl ProtocolHandler {
             .device_handle
             .read_bulk(self.ep_in, &mut incoming[..], USB_TIMEOUT)
             .map_err(|e| {
-                tracing::warn!("Something went wrong in read_bulk {:?}", e);
+                tracing::warn!("Something went wrong in read_bulk {:?} when trying to read {}bytes", e, count);
                 DebugProbeError::Usb(Some(Box::new(e)))
             })?;
 
@@ -591,10 +587,14 @@ impl OwnedBitIter {
         }
     }
 
+    pub fn remaining_bits(&self) -> usize {
+        self.bits_left
+    } 
+
     /// Splits off another `BitIter` from `self`s current position that will return `count` bits.
     ///
     /// After this call, `self` will be advanced by `count` bits.
-    pub fn split_off(&mut self, count: usize) -> OwnedBitIter {
+    pub fn split_off_owned(&mut self, count: usize) -> OwnedBitIter {
         assert!(count <= self.bits_left);
         let next_byte = (count + self.next_bit as usize) / 8;
         tracing::trace!(
@@ -620,6 +620,11 @@ impl OwnedBitIter {
 
         other
     }
+
+    pub fn into_bit_iter<'a>(&'a mut self) -> BitIter<'a> {
+        self.buf.make_contiguous();
+        BitIter::new(&self.buf.as_slices().0, self.bits_left)
+    }
 }
 
 impl Iterator for OwnedBitIter {
@@ -633,9 +638,7 @@ impl Iterator for OwnedBitIter {
                 self.next_bit += 1;
             } else {
                 self.next_bit = 0;
-                if self.buf.len() >= 2 {
-                    self.buf.pop_front();
-                }
+                self.buf.pop_front();
             }
 
             self.bits_left -= 1;
