@@ -295,11 +295,15 @@ impl ProtocolHandler {
             self.receive_buffer()?;
         }
 
+        tracing::trace!("Flushing complete! Merging buffers...");
+
         let iter = self
             .input_buffers
             .iter()
             .flat_map(|it| it.clone())
             .collect();
+
+        tracing::trace!("Merging complete...");
 
         self.input_buffers.clear();
 
@@ -348,11 +352,10 @@ impl ProtocolHandler {
             self.send_buffer()?;
         }
 
-        // TODO: Bizarre undocumented condition to flush buffer.
+        // Undocumented condition to flush buffer.
         // https://github.com/espressif/openocd-esp32/blob/a28f71785066722f49494e0d946fdc56966dcc0d/src/jtag/drivers/esp_usb_jtag.c#L367
         if self.output_buffer.len() % OUT_BUFFER_SIZE == 0 {
             if self.pending_in_bits > (64 + 4 - 1) * 8 {
-                tracing::warn!("WEIRD CONDITION MET IN add_raw_command");
                 self.send_buffer()?;
             }
         }
@@ -385,12 +388,10 @@ impl ProtocolHandler {
         // We only clear the output buffer on a successful transmission of all bytes.
         self.output_buffer.clear();
 
-        // TODO: Weird condition again.
         // https://github.com/espressif/openocd-esp32/blob/a28f71785066722f49494e0d946fdc56966dcc0d/src/jtag/drivers/esp_usb_jtag.c#L345
         loop {
             if self.pending_in_bits > (64 + 4 - 1) * 8 {
                 self.receive_buffer()?;
-                tracing::warn!("WEIRD CONDITION MET IN send_buffer");
             } else {
                 break;
             }
