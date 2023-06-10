@@ -18,7 +18,7 @@ use crate::{
     DebugProbe, DebugProbeError, DebugProbeSelector, WireProtocol,
 };
 
-use self::protocol::ProtocolHandler;
+use self::protocol::{ProtocolHandler, OwnedBitIter};
 
 use super::JTAGAccess;
 
@@ -94,6 +94,24 @@ impl EspUsbJtag {
     /// will be truncated to `len` bits. If data has less
     /// than `len` bits, an error will be returned.
     fn write_ir(&mut self, data: &[u8], len: usize) -> Result<(), DebugProbeError> {
+        if len >= 8 {
+            return Err(DebugProbeError::NotImplemented(
+                "Not yet implemented for IR registers larger than 8 bit",
+            ));
+        }
+        
+        self.prepare_write_ir(data, len)?;
+        let response = self.protocol.flush()?;
+        tracing::trace!("Response: {:?}", response);
+
+        // TODO: Why only store the first 8 bits?
+        self.current_ir_reg = data[0] as u32;
+
+        // Maybe we could return the previous state of the IR register here...
+        Ok(())
+    }
+
+    fn prepare_write_ir(&mut self, data: &[u8], len: usize) -> Result<usize, DebugProbeError> {
         tracing::debug!("Write IR: {:?}, len={}", data, len);
 
         // Check the bit length, enough data has to be
@@ -160,25 +178,46 @@ impl EspUsbJtag {
         tracing::trace!("tms: {:?}", tms);
         tracing::trace!("tdi: {:?}", tdi);
 
-        let response = self.protocol.jtag_io(tms, tdi, true)?;
+        let len = tms.len();
+        self.protocol.jtag_io_async(tms, tdi, true)?;
 
-        tracing::trace!("Response: {:?}", response);
-
-        if len >= 8 {
-            return Err(DebugProbeError::NotImplemented(
-                "Not yet implemented for IR registers larger than 8 bit",
-            ));
-        }
-
-        // TODO: Why only store the first 8 bits?
-        self.current_ir_reg = data[0] as u32;
-
-        // Maybe we could return the previous state of the IR register here...
-
-        Ok(())
+        Ok(len)
     }
 
     fn write_dr(&mut self, data: &[u8], register_bits: usize) -> Result<Vec<u8>, DebugProbeError> {
+        let bits = self.prepare_write_dr(data, register_bits)?;
+        let response = self.protocol.flush()?;
+        tracing::trace!("Response [{bits}][{}][{register_bits}]: {:?}", response.len(), response);
+        
+        Self::recieve_write_dr(response, register_bits)
+    }
+
+    fn recieve_write_dr(mut response: OwnedBitIter, register_bits: usize) -> Result<Vec<u8>, DebugProbeError> {
+        let tms_enter_shift = [true, false, false]; // TODO taken from below, make a const in future
+        
+        let _remainder = response.split_off(tms_enter_shift.len());
+
+        let mut remaining_bits = register_bits;
+
+        let mut result = Vec::new();
+
+        while remaining_bits >= 8 {
+            let byte = bits_to_byte(response.split_off(8)) as u8;
+            result.push(byte);
+            remaining_bits -= 8;
+        }
+
+        // Handle leftover bytes
+        if remaining_bits > 0 {
+            result.push(bits_to_byte(response.split_off(remaining_bits)) as u8);
+        }
+
+        tracing::trace!("result: {:?}", result);
+
+        Ok(result)
+    }
+
+    fn prepare_write_dr(&mut self, data: &[u8], register_bits: usize) -> Result<usize, DebugProbeError> {
         tracing::debug!("Write DR: {:?}, len={}", data, register_bits);
 
         let tms_enter_shift = [true, false, false];
@@ -233,31 +272,50 @@ impl EspUsbJtag {
         tms.extend(iter::repeat(false).take(self.idle_cycles() as usize));
         tdi.extend(iter::repeat(false).take(self.idle_cycles() as usize));
 
-        let mut response = self.protocol.jtag_io(tms, tdi, true)?;
+        let len = tms.len();
+        self.protocol.jtag_io_async(tms, tdi, true)?;
 
-        tracing::trace!("Response: {:?}", response);
-
-        let _remainder = response.split_off(tms_enter_shift.len());
-
-        let mut remaining_bits = register_bits;
-
-        let mut result = Vec::new();
-
-        while remaining_bits >= 8 {
-            let byte = bits_to_byte(response.split_off(8)) as u8;
-            result.push(byte);
-            remaining_bits -= 8;
-        }
-
-        // Handle leftover bytes
-        if remaining_bits > 0 {
-            result.push(bits_to_byte(response.split_off(remaining_bits)) as u8);
-        }
-
-        tracing::trace!("result: {:?}", result);
-
-        Ok(result)
+        Ok(len)
     }
+
+    /// Write the data register
+    fn prepare_write_register(
+        &mut self,
+        address: u32,
+        data: &[u8],
+        len: u32,
+    ) -> Result<DeferredRegisterWrite, DebugProbeError> {
+        let address_bits = address.to_le_bytes();
+
+        // TODO: This is limited to 5 bit addresses for now
+        if address > 0x1f {
+            return Err(DebugProbeError::NotImplemented(
+                "JTAG Register addresses are fixed to 5 bits",
+            ));
+        }
+
+        let write_ir_bits = if self.current_ir_reg != address {
+            // Write IR register
+            Some(self.prepare_write_ir(&address_bits[..1], 5)?)
+        } else {
+            None
+        };
+
+        // write DR register
+        let write_dr_bits_total = self.prepare_write_dr(data, len as usize)?;
+
+        Ok(DeferredRegisterWrite {
+            write_ir_bits,
+            write_dr_bits_total,
+            write_dr_bits: len as usize,
+        })
+    }
+}
+
+pub struct DeferredRegisterWrite {
+    write_ir_bits: Option<usize>,
+    write_dr_bits_total: usize,
+    write_dr_bits: usize,
 }
 
 impl JTAGAccess for EspUsbJtag {
@@ -319,6 +377,43 @@ impl JTAGAccess for EspUsbJtag {
     fn get_idle_cycles(&self) -> u8 {
         self.jtag_idle_cycles
     }
+
+    // fn write_register_batch(
+    //     &mut self,
+    //     writes: &[super::JtagWriteCommand],
+    // ) -> Result<Vec<super::CommandResult>, super::BatchExecutionError> {
+    //     self.protocol.input_buffers.clear();
+    //     let mut bits = Vec::new();
+    //     tracing::info!("Preparing writes...");
+    //     for write in writes {
+    //         bits.push(self.prepare_write_register(write.address, &write.data, write.len).unwrap());
+    //     }
+
+    //     tracing::info!("Sending to chip...");
+    //     self.protocol.flush().unwrap();
+
+    //     let mut response = BitIter::new(&self.protocol.input_buffer, self.protocol.input_buffer.len() * 8);
+
+    //     let mut responses = Vec::new();
+
+    //     for bit  in bits {
+    //         if let Some(ir_bits) = bit.write_ir_bits {
+    //             _ = response.split_off(ir_bits);
+    //         }
+    //         let dr_resp = response.split_off(bit.write_dr_bits_total);
+    //         let v = EspUsbJtag::recieve_write_dr(dr_resp, bit.write_dr_bits).unwrap();
+    //         responses.push(v);
+    //     }
+
+    //     let mut transformed = Vec::new();
+    //     for (index, resp) in responses.into_iter().enumerate() {
+    //         let transform = writes[index].transform;
+    //         let t = transform(resp).unwrap();
+    //         transformed.push(t);
+    //     }
+
+    //     Ok(transformed)
+    // }
 }
 
 impl DebugProbe for EspUsbJtag {
