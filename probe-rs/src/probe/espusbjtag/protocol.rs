@@ -10,7 +10,7 @@ use crate::{
 const JTAG_PROTOCOL_CAPABILITIES_VERSION: u8 = 1;
 const JTAG_PROTOCOL_CAPABILITIES_SPEED_APB_TYPE: u8 = 1;
 const MAX_COMMAND_REPETITIONS: usize = 1024;
-const OUT_BUFFER_SIZE: usize = OUT_EP_BUFFER_SIZE;
+const OUT_BUFFER_SIZE: usize = OUT_EP_BUFFER_SIZE * 32;
 const OUT_EP_BUFFER_SIZE: usize = 64;
 const IN_EP_BUFFER_SIZE: usize = 64;
 const USB_TIMEOUT: Duration = Duration::from_millis(5000);
@@ -344,13 +344,13 @@ impl ProtocolHandler {
         self.output_buffer.push(command);
 
         // If we reach a maximal size of the output buffer, we flush.
-        if self.output_buffer.len() == OUT_BUFFER_SIZE {
+        if self.output_buffer.len() == (OUT_BUFFER_SIZE * 2) {
             self.send_buffer()?;
         }
 
         // Undocumented condition to flush buffer.
         // https://github.com/espressif/openocd-esp32/blob/a28f71785066722f49494e0d946fdc56966dcc0d/src/jtag/drivers/esp_usb_jtag.c#L367
-        if self.output_buffer.len() % OUT_BUFFER_SIZE == 0 {
+        if self.output_buffer.len() % (OUT_EP_BUFFER_SIZE * 2) == 0 {
             if self.pending_in_bits > (64 + 4 - 1) * 8 {
                 self.send_buffer()?;
             }
@@ -585,40 +585,6 @@ impl OwnedBitIter {
             next_bit: 0,
             bits_left: total_bits,
         }
-    }
-
-    pub fn remaining_bits(&self) -> usize {
-        self.bits_left
-    } 
-
-    /// Splits off another `BitIter` from `self`s current position that will return `count` bits.
-    ///
-    /// After this call, `self` will be advanced by `count` bits.
-    pub fn split_off_owned(&mut self, count: usize) -> OwnedBitIter {
-        assert!(count <= self.bits_left);
-        let next_byte = (count + self.next_bit as usize) / 8;
-        tracing::trace!(
-            "Splitting Self [bit index = {}]... Before: {:?}",
-            count,
-            self
-        );
-
-        let new_buf = self.buf.split_off(next_byte);
-        self.buf.push_back(*new_buf.front().unwrap());
-        let other = Self {
-            buf: self.buf.clone(),
-            next_bit: self.next_bit,
-            bits_left: count,
-        };
-        tracing::trace!("Other buffer at split off {:?}", other);
-
-        // Update self
-        self.next_bit = (count as u8 + self.next_bit) % 8;
-        self.buf = new_buf;
-        self.bits_left -= count;
-        tracing::trace!("Self buffer at split off {:?}", self);
-
-        other
     }
 
     pub fn into_bit_iter<'a>(&'a mut self) -> BitIter<'a> {

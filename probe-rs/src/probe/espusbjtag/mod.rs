@@ -18,7 +18,7 @@ use crate::{
     DebugProbe, DebugProbeError, DebugProbeSelector, WireProtocol,
 };
 
-use self::protocol::{ProtocolHandler, OwnedBitIter, BitIter};
+use self::protocol::{ProtocolHandler, BitIter};
 
 use super::JTAGAccess;
 
@@ -295,15 +295,14 @@ impl EspUsbJtag {
             ));
         }
 
-        self.current_ir_reg = data[0] as u32;
         let write_ir_bits = if self.current_ir_reg != address {
             // Write IR register
-            Some(self.prepare_write_ir(&address_bits[..1], 5)?)
+            let def = self.prepare_write_ir(&address_bits[..1], 5)?;
+            self.current_ir_reg = data[0] as u32;
+            Some(def)
         } else {
             None
         };
-        // TODO can this be optmized out or not?
-        // let write_ir_bits = Some(self.prepare_write_ir(&address_bits[..1], 5)?);
 
         // write DR register
         let write_dr_bits_total = self.prepare_write_dr(data, len as usize)?;
