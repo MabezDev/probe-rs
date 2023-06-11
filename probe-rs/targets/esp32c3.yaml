@@ -50,19 +50,19 @@ flash_algorithms:
   - name: esp32c3-flashloader
     description: A flash loader for the esp32c3.
     default: true
-    instructions: QREGxjcFOUADRQUHGcEBRS2glwDH/+eAoHCBRZcAx//ngIAUlwDH/+eAwBEZ5QFFtwU5QAVGI4jFBrJAQQGCgDGBFwPH/2cAYw4XA8f/ZwBjDRN3NgABxxMFoAqCgK6GsoU2hhcDx/9nAIMMAUWCgAAAAAA=
     load_address: 0x40390000 # See discussion at https://github.com/probe-rs/probe-rs/pull/1209/#issuecomment-1218430338
-    pc_init: 0
-    pc_uninit: 108
-    pc_program_page: 82
-    pc_erase_sector: 64
-    pc_erase_all: 74
-    data_section_offset: 116
+    instructions: QREGxiLEJsIhRXMwBTA3hABgCEATdfWrCMA35QBgLEHdmSzBLEGT5UUALMG3BAxgiEQTZUUAiMQTBWAGEUaTBrAGgUWXIMf/54CAkRMFYAYJRpMGAAWBRZcgx//ngECQEwVgBg1GoUaBRZcgx//ngCCPEwVgBhVGiUaBRQFHgUeXIMf/54AAjhMFYAYVRplGEUeBRYFHlyDH/+eAoIwTBWAGGUaTBjAJgUWXIMf/54AgixMFYAYlRoVGiUeBRQFHlyDH/+eAAIoTBWAGGUaVRhFHiUeBRZcgx//ngKCIEwVgBhlGnUYZR4VHgUWXIMf/54BAh6hM/XVtjRMFBUCozIhEcZkFBYjEEwUACpcAx//ngMBHAyXECzdVS0wTBbXEIy6kCpcAx//ngIBfgUWXAMf/54BgA5cAx//ngKAADeG3BQAEQWaFZhMHABD9V5cAx//ngGD+EzUVAH0VE3XVDbJAIkSSREEBgoAxgRcDx/9nAMP7FwPH/2cAw/oTdzYAAccTBaAKgoCuhrKFNoYXA8f/ZwDj+QFFgoCCgIKAAUVzdQQwcgV9gYKAE3X1DwHFIUVzIAUwgoA=
+    pc_init: 0x0
+    pc_uninit: 0x196
+    pc_program_page: 0x17c
+    pc_erase_sector: 0x16a
+    pc_erase_all: 0x174
+    data_section_offset: 0x403901b8
     flash_properties:
       address_range: #16 Mb Max addressable Flash size
         start: 0x0
         end: 0x1000000
-      page_size: 2048
+      page_size: 8192
       erased_byte_value: 255
       program_page_timeout: 1000
       erase_sector_timeout: 2000

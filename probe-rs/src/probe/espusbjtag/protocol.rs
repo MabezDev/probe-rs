@@ -10,7 +10,7 @@ use crate::{
 const JTAG_PROTOCOL_CAPABILITIES_VERSION: u8 = 1;
 const JTAG_PROTOCOL_CAPABILITIES_SPEED_APB_TYPE: u8 = 1;
 const MAX_COMMAND_REPETITIONS: usize = 1024;
-const OUT_BUFFER_SIZE: usize = OUT_EP_BUFFER_SIZE * 32;
+const OUT_BUFFER_SIZE: usize = OUT_EP_BUFFER_SIZE * 1;
 const OUT_EP_BUFFER_SIZE: usize = 64;
 const IN_EP_BUFFER_SIZE: usize = 64;
 const USB_TIMEOUT: Duration = Duration::from_millis(5000);
@@ -344,6 +344,7 @@ impl ProtocolHandler {
         self.output_buffer.push(command);
 
         // If we reach a maximal size of the output buffer, we flush.
+        assert!(self.output_buffer.len() <= (OUT_BUFFER_SIZE * 2));
         if self.output_buffer.len() == (OUT_BUFFER_SIZE * 2) {
             self.send_buffer()?;
         }
@@ -351,7 +352,7 @@ impl ProtocolHandler {
         // Undocumented condition to flush buffer.
         // https://github.com/espressif/openocd-esp32/blob/a28f71785066722f49494e0d946fdc56966dcc0d/src/jtag/drivers/esp_usb_jtag.c#L367
         if self.output_buffer.len() % (OUT_EP_BUFFER_SIZE * 2) == 0 {
-            if self.pending_in_bits > (64 + 4 - 1) * 8 {
+            if self.pending_in_bits > (64 + 4) * 8 {
                 self.send_buffer()?;
             }
         }
@@ -376,22 +377,38 @@ impl ProtocolHandler {
                 }
             })
             .collect::<Vec<_>>();
+        tracing::warn!("Writing {}byte ({}nibles) to usb endpoint", commands.len(), commands.len() * 2);
+        let mut offset = 0;
+        let mut total = 0;
+        loop {
+            let bytes = self
+                .device_handle
+                .write_bulk(self.ep_out, &commands[offset..], USB_TIMEOUT)
+                .map_err(|e| DebugProbeError::Usb(Some(Box::new(e))))?;
+            total += bytes;
+            offset += bytes;
 
-        self.device_handle
-            .write_bulk(self.ep_out, &commands, USB_TIMEOUT)
-            .map_err(|e| DebugProbeError::Usb(Some(Box::new(e))))?;
+            if total == commands.len() {
+                break;
+            }
+        }
 
+        // assert_eq!(bytes, commands.len());
         // We only clear the output buffer on a successful transmission of all bytes.
         self.output_buffer.clear();
 
         // https://github.com/espressif/openocd-esp32/blob/a28f71785066722f49494e0d946fdc56966dcc0d/src/jtag/drivers/esp_usb_jtag.c#L345
         loop {
-            if self.pending_in_bits > (64 + 4 - 1) * 8 {
+            if self.pending_in_bits > (64 + 4) * 8 {
+                tracing::warn!("More than a buffer in pending: {}, trying to recieve until one left", self.pending_in_bits);
                 self.receive_buffer()?;
             } else {
+                tracing::warn!("Pending after: {}", self.pending_in_bits);
                 break;
             }
         }
+
+        // assert!(self.pending_in_bits < IN_EP_BUFFER_SIZE * 2, "{} pending bits exceeds the esp-serial-jtags internal buffer of {}bytes", self.pending_in_bits, IN_EP_BUFFER_SIZE * 2);
 
         Ok(())
     }
@@ -401,32 +418,46 @@ impl ProtocolHandler {
         let count = ((self.pending_in_bits + 7) / 8).min(IN_EP_BUFFER_SIZE);
         let mut incoming = vec![0; count];
 
+        tracing::warn!("Receiving buffer, pending bits: {}", self.pending_in_bits);
+
         if count == 0 {
             return Ok(());
         }
 
-        let read_bytes = self
-            .device_handle
-            .read_bulk(self.ep_in, &mut incoming[..], USB_TIMEOUT)
-            .map_err(|e| {
-                tracing::warn!("Something went wrong in read_bulk {:?} when trying to read {}bytes", e, count);
-                DebugProbeError::Usb(Some(Box::new(e)))
-            })?;
+        let mut offset = 0;
+        let mut total = 0;
+        loop {
+            let read_bytes = self
+                .device_handle
+                .read_bulk(self.ep_in, &mut incoming[offset..], USB_TIMEOUT)
+                .map_err(|e| {
+                    tracing::warn!(
+                        "Something went wrong in read_bulk {:?} when trying to read {}bytes - pending_in_bits: {}",
+                        e,
+                        count,
+                        self.pending_in_bits,
+                    );
+                    tracing::warn!("Attempting to send data to recieve..");
+                    DebugProbeError::Usb(Some(Box::new(e)))
+                })?;
+            total += read_bytes;
+            offset += read_bytes;
 
-        if read_bytes == 0 {
-            tracing::trace!("Read 0 bytes from USB");
-            return Ok(());
+            if read_bytes == 0 {
+                tracing::warn!("Read 0 bytes from USB");
+                return Ok(());
+            }
+
+            if total == count {
+                break;
+            } else {
+                tracing::warn!("USB only recieved {} out of {} bytes", read_bytes, count);
+            }
+
+            tracing::trace!("Received {} bytes.", read_bytes);
         }
 
-        tracing::trace!("Received {} bytes.", read_bytes);
-
-        if read_bytes != count {
-            return Err(DebugProbeError::ProbeSpecific(
-                format!("USB only recieved {} out of {} bytes", read_bytes, count).into(),
-            ));
-        }
-
-        let bits_in_buffer = self.pending_in_bits.min(read_bytes * 8);
+        let bits_in_buffer = self.pending_in_bits.min(total * 8);
 
         tracing::trace!("Read: {:?}, length = {}", incoming, bits_in_buffer);
         self.pending_in_bits -= bits_in_buffer;
@@ -624,7 +655,9 @@ impl FromIterator<bool> for OwnedBitIter {
     where
         T: IntoIterator<Item = bool>,
     {
-        let mut buf = VecDeque::new(); // TODO sizehint?
+        let iter = iter.into_iter();
+        let (lower, upper) = iter.size_hint();
+        let mut buf = VecDeque::with_capacity(upper.unwrap_or(lower));
         let mut total_bits = 0;
         let mut current_byte = 0;
         let mut bit_index: u8 = 0;

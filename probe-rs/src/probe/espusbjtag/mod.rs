@@ -18,7 +18,7 @@ use crate::{
     DebugProbe, DebugProbeError, DebugProbeSelector, WireProtocol,
 };
 
-use self::protocol::{ProtocolHandler, BitIter};
+use self::protocol::{BitIter, ProtocolHandler};
 
 use super::JTAGAccess;
 
@@ -100,7 +100,7 @@ impl EspUsbJtag {
                 "Not yet implemented for IR registers larger than 8 bit",
             ));
         }
-        
+
         self.prepare_write_ir(data, len)?;
         let response = self.protocol.flush()?;
         tracing::trace!("Response: {:?}", response);
@@ -193,9 +193,12 @@ impl EspUsbJtag {
         Self::recieve_write_dr(response, register_bits)
     }
 
-    fn recieve_write_dr(mut response: BitIter, register_bits: usize) -> Result<Vec<u8>, DebugProbeError> {
+    fn recieve_write_dr(
+        mut response: BitIter,
+        register_bits: usize,
+    ) -> Result<Vec<u8>, DebugProbeError> {
         let tms_enter_shift = [true, false, false]; // TODO taken from below, make a const in future
-        
+
         let _remainder = response.split_off(tms_enter_shift.len());
 
         let mut remaining_bits = register_bits;
@@ -218,7 +221,11 @@ impl EspUsbJtag {
         Ok(result)
     }
 
-    fn prepare_write_dr(&mut self, data: &[u8], register_bits: usize) -> Result<usize, DebugProbeError> {
+    fn prepare_write_dr(
+        &mut self,
+        data: &[u8],
+        register_bits: usize,
+    ) -> Result<usize, DebugProbeError> {
         tracing::debug!("Write DR: {:?}, len={}", data, register_bits);
 
         let tms_enter_shift = [true, false, false];
@@ -385,11 +392,14 @@ impl JTAGAccess for EspUsbJtag {
         &mut self,
         writes: &[super::JtagWriteCommand],
     ) -> Result<Vec<super::CommandResult>, super::BatchExecutionError> {
-        let mut bits = Vec::new();
+        let mut bits = Vec::with_capacity(writes.len());
         let t1 = std::time::Instant::now();
         tracing::info!("Preparing {} writes...", writes.len());
         for write in writes {
-            bits.push(self.prepare_write_register(write.address, &write.data, write.len).unwrap());
+            bits.push(
+                self.prepare_write_register(write.address, &write.data, write.len)
+                    .unwrap(),
+            );
         }
 
         tracing::info!("Sending to chip...");
@@ -397,27 +407,21 @@ impl JTAGAccess for EspUsbJtag {
         tracing::info!("Got responses! Took {:?}! Processing...", t1.elapsed());
         let mut response = response.into_bit_iter();
 
-        let mut responses = Vec::new();
+        let mut responses = Vec::with_capacity(bits.len());
 
-        for bit  in bits {
+        for (index, bit) in bits.into_iter().enumerate() {
             if let Some(ir_bits) = bit.write_ir_bits {
                 _ = response.split_off(ir_bits);
             }
             let dr_resp = response.split_off(bit.write_dr_bits_total);
             let v = EspUsbJtag::recieve_write_dr(dr_resp, bit.write_dr_bits).unwrap();
-            responses.push(v);
-        }
 
-        tracing::info!("Transforming responses...");
-
-        let mut transformed = Vec::new();
-        for (index, resp) in responses.into_iter().enumerate() {
             let transform = writes[index].transform;
-            let t = transform(resp).unwrap();
-            transformed.push(t);
+            let t = transform(v).unwrap();
+            responses.push(t);
         }
 
-        Ok(transformed)
+        Ok(responses)
     }
 }
 
