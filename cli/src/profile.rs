@@ -4,7 +4,7 @@ use addr2line::{
     Context as ObjectContext, LookupResult,
 };
 use anyhow::Context;
-use probe_rs::flashing::FileDownloadError;
+use probe_rs::{flashing::FileDownloadError, debug::DebugInfo};
 use probe_rs_cli_util::{
     clap,
     common_options::{CargoOptions, FlashOptions, ProbeOptions},
@@ -78,8 +78,7 @@ pub fn profile(
         Err(e) => return Err(FileDownloadError::IO(e)).context("Failed to open binary file."),
     };
 
-    let bytes = std::fs::read(path)?;
-    let symbols = Symbols::try_from(&bytes)?;
+    let symbols = DebugInfo::from_file(path)?;
 
     if profile_opts.flash {
         let mut loader = session.target().flash_loader();
@@ -135,13 +134,16 @@ pub fn profile(
 
     for (address, count) in v.into_iter().take(profile_opts.limit) {
         let name = symbols
-            .get_name(address as u64)
+            .function_name(address as u64, true)?
             .unwrap_or(format!("UNKNOWN - {:08X}", address));
-        let (file, num) = symbols
-            .get_location(address as u64)
-            .unwrap_or(("UNKNOWN".to_owned(), 0));
+        let source = symbols
+            .get_source_location(address as u64);
         if profile_opts.line_info {
-            println!("{}:{}", file, num);
+            if let Some(source) = source {
+                println!("{}:{}", source.file.unwrap_or("UNKNOWN".to_owned()), source.line.unwrap_or(0));
+            } else {
+                println!("UNKNOWN:0");
+            }
         }
         println!(
             "{:>50} - {:.01}%",
@@ -151,64 +153,4 @@ pub fn profile(
     }
 
     Ok(())
-}
-
-// Wrapper around addr2line that allows to look up function names
-pub(crate) struct Symbols<'sym> {
-    file: ObjectFile<'sym, &'sym [u8]>,
-    ctx: ObjectContext<EndianRcSlice<RunTimeEndian>>,
-}
-
-impl<'sym> Symbols<'sym> {
-    pub fn try_from(bytes: &'sym [u8]) -> anyhow::Result<Self> {
-        let file = ObjectFile::parse(bytes)?;
-        let ctx = ObjectContext::new(&file)?;
-
-        Ok(Self { file, ctx })
-    }
-
-    /// Returns the name of the function at the given address, if one can be found.
-    pub fn get_name(&self, addr: u64) -> Option<String> {
-        // The basic steps here are:
-        //   1. find which frame `addr` is in
-        //   2. look up and demangle the function name
-        //   3. if no function name is found, try to look it up in the object file
-        //      directly
-        //   4. return a demangled function name, if one was found
-        let mut frames = match self.ctx.find_frames(addr) {
-            LookupResult::Output(result) => result.unwrap(),
-            LookupResult::Load { .. } => unimplemented!(),
-        };
-
-        frames
-            .next()
-            .ok()
-            .flatten()
-            .and_then(|frame| {
-                frame
-                    .function
-                    .and_then(|name| name.demangle().map(|s| s.into_owned()).ok())
-            })
-            .or_else(|| {
-                self.file
-                    .symbol_map()
-                    .get(addr)
-                    .map(|sym| sym.name().to_string())
-            })
-    }
-
-    /// Returns the file name and line number of the function at the given address, if one can be.
-    pub fn get_location(&self, addr: u64) -> Option<(String, u32)> {
-        // Find the location which `addr` is in. If we can dedetermine a file name and
-        // line number for this function we will return them both in a tuple.
-        self.ctx.find_location(addr).ok()?.map(|location| {
-            let file = location.file.map(|f| f.to_string());
-            let line = location.line;
-
-            match (file, line) {
-                (Some(file), Some(line)) => Some((file, line)),
-                _ => None,
-            }
-        })?
-    }
 }
