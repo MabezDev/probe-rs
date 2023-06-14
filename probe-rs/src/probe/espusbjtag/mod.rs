@@ -3,7 +3,6 @@ mod protocol;
 use std::{
     convert::TryInto,
     iter,
-    time::{Duration, Instant}
 };
 
 use crate::{
@@ -14,7 +13,7 @@ use crate::{
         },
         riscv::communication_interface::{RiscvCommunicationInterface, RiscvError},
     },
-    probe::jlink::bits_to_byte,
+    probe::{jlink::bits_to_byte, espusbjtag::protocol::BitIter},
     DebugProbe, DebugProbeError, DebugProbeSelector, WireProtocol,
 };
 
@@ -35,6 +34,8 @@ pub(crate) struct EspUsbJtag {
     current_ir_reg: u32,
 
     speed_khz: u32,
+
+    
 }
 
 impl EspUsbJtag {
@@ -58,7 +59,9 @@ impl EspUsbJtag {
         tms.extend(tms_shift_out_value);
         tms.extend_from_slice(&tms_enter_idle);
 
-        let tdi = iter::repeat(true).take(tms.len()).chain(iter::repeat(false).take(self.idle_cycles() as usize));
+        let tdi = iter::repeat(true)
+            .take(tms.len())
+            .chain(iter::repeat(false).take(self.idle_cycles() as usize));
 
         // We have to stay in the idle cycle a bit
         tms.extend(iter::repeat(false).take(self.idle_cycles() as usize));
@@ -93,7 +96,7 @@ impl EspUsbJtag {
     /// IR register might have an odd length, so the data
     /// will be truncated to `len` bits. If data has less
     /// than `len` bits, an error will be returned.
-    fn write_ir(&mut self, data: &[u8], len: usize) -> Result<(), DebugProbeError> {
+    fn write_ir(&mut self, data: &[u8], len: usize) -> Result<Vec<u8>, DebugProbeError> {
         tracing::debug!("Write IR: {:?}, len={}", data, len);
 
         // Check the bit length, enough data has to be
@@ -160,22 +163,39 @@ impl EspUsbJtag {
         tracing::trace!("tms: {:?}", tms);
         tracing::trace!("tdi: {:?}", tdi);
 
-        let response = self.protocol.jtag_io(tms, tdi, true)?;
+        let mut response = self.protocol.jtag_io(tms, tdi, true)?;
 
         tracing::trace!("Response: {:?}", response);
 
-        if len >= 8 {
-            return Err(DebugProbeError::NotImplemented(
-                "Not yet implemented for IR registers larger than 8 bit",
-            ));
-        }
+        // if len >= 8 {
+        //     return Err(DebugProbeError::NotImplemented(
+        //         "Not yet implemented for IR registers larger than 8 bit",
+        //     ));
+        // }
 
         // TODO: Why only store the first 8 bits?
         self.current_ir_reg = data[0] as u32;
 
-        // Maybe we could return the previous state of the IR register here...
+        let _remainder = response.split_off(tms_enter_ir_shift.len());
 
-        Ok(())
+        let mut remaining_bits = len;
+
+        let mut result = Vec::new();
+
+        while remaining_bits >= 8 {
+            let byte = bits_to_byte(response.split_off(8)) as u8;
+            result.push(byte);
+            remaining_bits -= 8;
+        }
+
+        // Handle leftover bytes
+        if remaining_bits > 0 {
+            result.push(bits_to_byte(response.split_off(remaining_bits)) as u8);
+        }
+
+        tracing::trace!("result: {:?}", result);
+
+        Ok(result)
     }
 
     fn write_dr(&mut self, data: &[u8], register_bits: usize) -> Result<Vec<u8>, DebugProbeError> {
@@ -260,7 +280,7 @@ impl EspUsbJtag {
     }
 
     // TODO in the future this should return more than one idcode if more is available
-    fn reset_scan(&mut self) -> Result<Vec<u32>, super::DebugProbeError> {
+    fn reset_scan(&mut self) -> Result<(Vec<u32>, Vec<usize>), super::DebugProbeError> {
         let max_chain = 8;
 
         tracing::debug!("Resetting JTAG chain using trst");
@@ -272,40 +292,40 @@ impl EspUsbJtag {
 
         // Reset JTAG chain (5 times TMS high), and enter idle state afterwards
         let tms = vec![true, true, true, true, true, false];
-        let tdi = iter::repeat(false).take(6);
+        let tdi = iter::repeat(true).take(6);
 
-        let response: Vec<_> = self.protocol.jtag_io(tms, tdi, false)?.collect();
+        let response: Vec<_> = self.protocol.jtag_io(tms, tdi, true)?.collect();
 
         tracing::debug!("Response to reset: {:?}", response);
 
-        // try to read the idcode until we have some non-zero bytes
-        let start = Instant::now();
-        let idcodes = {
-            let mut idcodes = Vec::with_capacity(max_chain);
-            let idcode = 'first: loop {
-                let idcode_bytes = self.write_dr(&(0xFFFFFFFFu32).to_le_bytes()[..],32)?;
-                if idcode_bytes.iter().any(|&x| x != 0)
-                    || Instant::now().duration_since(start) > Duration::from_secs(1)
-                {
-                    break 'first u32::from_le_bytes((&idcode_bytes[..]).try_into().unwrap());
-                }
-            };
-            tracing::info!("FIRST ID CODE: {:?}", idcode);
-            idcodes.push(idcode);
-            for _ in 0..(max_chain - 1) {
-                let idcode = self.write_dr(&(0xFFFFFFFFu32).to_le_bytes()[..],32)?;
-                tracing::info!("{:?}", idcode);
-                idcodes.push(u32::from_le_bytes(
-                    (&idcode[..]).try_into().unwrap(),
-                ))
+        let input = Vec::from_iter(iter::repeat(0xFFu8).take(4 * max_chain));
+        let response = self.write_dr(&input, 4 * max_chain * 8).unwrap();
+
+        tracing::trace!("DR: {:?}", response);
+
+        let mut idcodes = Vec::new();
+
+        for idcode in response.chunks(4) {
+            if idcode.len() != 4 {
+                panic!("Bad length");
             }
+            if idcode == [0xFF, 0xFF, 0xFF, 0xFF] {
+                break;
+            }
+            idcodes.push(u32::from_le_bytes((&idcode[..]).try_into().unwrap()));
+        }
 
-            idcodes
-        };
+        tracing::info!("JTAG dr scan complete, found {} TAPS. {:?}", idcodes.len(), idcodes);
 
-        tracing::info!("Chain scan result: {:?}", idcodes);
+        let input = Vec::from_iter(iter::repeat(0xffu8).take(idcodes.len()));
+        let response = self.write_ir(&input, idcodes.len() * 8).unwrap();
+        
+        let bits: Vec<bool> = BitIter::new(&response, input.len() * 8).collect();
 
-        Ok(idcodes)
+        let ir_lens = extract_ir_lengths(&bits, idcodes.len(), None).unwrap();
+        tracing::info!("Detected IR lens: {:?}", ir_lens);
+
+        Ok((idcodes, ir_lens))
     }
 }
 
@@ -371,10 +391,10 @@ impl JTAGAccess for EspUsbJtag {
 
     fn scan(&mut self) -> Result<Vec<super::JtagChainItem>, DebugProbeError> {
         let chain = self.reset_scan()?;
-        Ok(chain.iter()
-            .map(|&i| JtagChainItem {
-                idcode: i,
-                irlen: 5, // TODO this is currently fixed to 5bits
+        Ok(chain.0.iter().zip(chain.1.iter())
+            .map(|(&id, &ir)| JtagChainItem {
+                idcode: id,
+                irlen: ir ,
             })
             .collect())
     }
@@ -423,9 +443,9 @@ impl DebugProbe for EspUsbJtag {
     fn attach(&mut self) -> Result<(), super::DebugProbeError> {
         tracing::debug!("Attaching to ESP USB JTAG");
 
-        let chain = self.reset_scan()?;
+        let chain = self.scan()?;
         // TODO currently only attaching to first one in the chain
-        tracing::info!("JTAG IDCODE: {:#010x}", chain[0]);
+        tracing::info!("JTAG Chain: {:?}", chain);
         // TODO code required to attach to a specific target
 
         Ok(())
@@ -502,4 +522,81 @@ impl DebugProbe for EspUsbJtag {
         // We cannot read the voltage on this probe, unfortunately.
         Ok(None)
     }
+}
+
+fn extract_ir_lengths(ir: &[bool], n_taps: usize, expected: Option<&[usize]>)
+    -> Result<Vec<usize>, DebugProbeError>
+{
+    // Find all `10` patterns which indicate potential IR start positions.
+    let starts = ir.windows(2)
+                   .enumerate()
+                   .filter(|(_, w)| w[0] && !w[1])
+                   .map(|(i, _)| i)
+                   .collect::<Vec<usize>>();
+    tracing::info!("Possible IR start positions: {starts:?}");
+
+    if n_taps == 0 {
+        tracing::error!("Cannot scan IR without at least one TAP");
+        todo!("Cannot scan IR without at least one TAP")
+    } else if n_taps > starts.len() {
+        // We must have at least as many `10` patterns as TAPs.
+        tracing::error!("Fewer IRs detected than TAPs");
+        todo!("Fewer IRs detected than TAPs")
+    } else if starts[0] != 0 {
+        // The chain must begin with a possible start location.
+        tracing::error!("IR chain does not begin with a valid start pattern");
+        todo!("IR chain does not begin with a valid start pattern")
+    } else if let Some(expected) = expected {
+        // If expected lengths are available, verify and return them.
+        if expected.len() != n_taps {
+            tracing::error!("Number of provided IR lengths ({}) does not match \
+                         number of detected TAPs ({n_taps})", expected.len());
+            todo!("Number of provided IR lengths ({}) does not match \
+                         number of detected TAPs ({n_taps})", expected.len())
+        } else if expected.iter().sum::<usize>() != ir.len() {
+            tracing::error!("Sum of provided IR lengths ({}) does not match \
+                         length of IR scan ({} bits)",
+                         expected.iter().sum::<usize>(), ir.len());
+            todo!("Sum of provided IR lengths ({}) does not match \
+                         length of IR scan ({} bits)",
+                         expected.iter().sum::<usize>(), ir.len())
+        } else {
+            let exp_starts = expected.iter()
+                                     .scan(0, |a, &x| { let b = *a; *a += x; Some(b) })
+                                     .collect::<Vec<usize>>();
+            tracing::trace!("Provided IR start positions: {exp_starts:?}");
+            let unsupported = exp_starts.iter().filter(|s| !starts.contains(s)).count();
+            if unsupported > 0 {
+                tracing::error!("Provided IR lengths imply an IR start position \
+                             which is not supported by the IR scan");
+                todo!("Provided IR lengths imply an IR start position \
+                             which is not supported by the IR scan")
+            } else {
+                tracing::debug!("Verified provided IR lengths against IR scan");
+                Ok(starts_to_lens(&exp_starts, ir.len()))
+            }
+        }
+    } else if n_taps == 1 {
+        // If there's only one TAP, this is easy.
+        tracing::info!("Only one TAP detected, IR length {}", ir.len());
+        Ok(vec![ir.len()])
+    } else if n_taps == starts.len() {
+        // If the number of possible starts matches the number of TAPs,
+        // we can unambiguously find all lengths.
+        let irlens = starts_to_lens(&starts, ir.len());
+        tracing::info!("IR lengths are unambiguous: {irlens:?}");
+        Ok(irlens)
+    } else {
+        tracing::error!("IR lengths are ambiguous and must be specified.");
+        todo!("IR lengths are ambiguous and must be specified.")
+    }
+}
+
+/// Convert a list of start positions to a list of lengths.
+fn starts_to_lens(starts: &[usize], total: usize) -> Vec<usize> {
+    let mut lens: Vec<usize> = starts.windows(2)
+                                     .map(|w| w[1] - w[0])
+                                     .collect();
+    lens.push(total - lens.iter().sum::<usize>());
+    lens
 }
