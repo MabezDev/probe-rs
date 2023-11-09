@@ -1,34 +1,37 @@
 name: esp32h2
 variants:
-- name: esp32h2
-  cores:
+  - name: esp32h2
+    scan_chain:
+    - name: main
+      ir_len: 5
+    cores:
     - name: main
       type: riscv
       core_access_options: !Riscv {}
-  memory_map:
-    - !Nvm
-      range: #16 Mb Max addressable Flash size
-        start: 0x0
-        end: 0x01000000
-      is_boot_memory: true
-      cores:
-        - main
-    - !Nvm
-      range: # External Flash on Instruction/Data Bus
-        start: 0x42000000
-        end: 0x42FFFFFF
-      is_boot_memory: false
-      cores:
-        - main
-    - !Ram
-      range:
-        start: 0x40800000
-        end: 0x4087FFFF
-      is_boot_memory: false
-      cores:
-        - main
-  flash_algorithms:
-  - esp32h2-flashloader
+    memory_map:
+      - !Nvm
+        range: #16 Mb Max addressable Flash size
+          start: 0x0
+          end: 0x01000000
+        is_boot_memory: true
+        cores:
+          - main
+      - !Nvm
+        range: # External Flash on Instruction/Data Bus
+          start: 0x42000000
+          end: 0x42FFFFFF
+        is_boot_memory: false
+        cores:
+          - main
+      - !Ram
+        range:
+          start: 0x40800000
+          end: 0x4087FFFF
+        is_boot_memory: false
+        cores:
+          - main
+    flash_algorithms:
+      - esp32h2-flashloader
 flash_algorithms:
 - name: esp32h2-flashloader
   description: 'A flasher loader for the esp32h2.'
