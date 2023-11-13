@@ -26,6 +26,7 @@ pub struct XtensaCommunicationInterface {
 impl XtensaCommunicationInterface {
     /// Create the Xtensa communication interface using the underlying probe driver
     pub fn new(probe: Box<dyn JTAGAccess>) -> Result<Self, (Box<dyn JTAGAccess>, DebugProbeError)> {
+        tracing::info!("Initializing XtensaCommunicationInterface...");
         let xdm = Xdm::new(probe).map_err(|(probe, e)| match e {
             XtensaError::DebugProbe(err) => (probe, err),
             other_error => (
