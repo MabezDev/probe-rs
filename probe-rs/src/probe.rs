@@ -437,7 +437,7 @@ impl Probe {
         &mut self,
         scan_chain: Vec<ScanChainElement>,
     ) -> Result<(), DebugProbeError> {
-        if self.attached {
+        if !self.attached {
             self.inner.set_scan_chain(scan_chain)
         } else {
             Err(DebugProbeError::Attached)
