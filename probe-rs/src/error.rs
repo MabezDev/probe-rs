@@ -15,8 +15,8 @@ pub enum Error {
     /// An ARM specific error occurred.
     #[error("An ARM specific error occurred.")]
     Arm(#[source] ArmError),
-    /// A RISCV specific error occurred.
-    #[error("A RISCV specific error occurred.")]
+    /// A RISC-V specific error occurred.
+    #[error("A RISC-V specific error occurred.")]
     Riscv(#[source] RiscvError),
     /// An Xtensa specific error occurred.
     #[error("An Xtensa specific error occurred.")]
