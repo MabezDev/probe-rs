@@ -85,7 +85,7 @@ impl EspUsbJtag {
         }
 
         tracing::info!(
-            "JTAG dr scan complete, found {} TAPS. {:?}",
+            "JTAG dr scan complete, found {} TAPs. {:?}",
             idcodes.len(),
             idcodes
         );
