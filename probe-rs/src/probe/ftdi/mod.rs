@@ -614,7 +614,7 @@ impl JTAGAccess for FtdiProbe {
         Ok(r)
     }
 
-    fn get_idle_cycles(&self) -> u8 {
+    fn idle_cycles(&self) -> u8 {
         self.idle_cycles
     }
 
