@@ -139,3 +139,68 @@ impl SpecialRegister {
         self as u8
     }
 }
+
+pub struct MemoryRegion {
+    pub addr: u32,
+    pub size: u32,
+}
+
+impl MemoryRegion {
+    fn as_range(&self) -> Range<u32> {
+        self.addr..self.addr + self.size
+    }
+
+    fn contains(&self, addr: u32) -> bool {
+        self.as_range().contains(&addr)
+    }
+}
+
+pub struct MemoryConfig {
+    pub regions: Vec<MemoryRegion>,
+}
+
+impl MemoryConfig {
+    fn is_cacheable(&self, address: u32) -> bool {
+        self.regions.iter().any(|region| region.contains(address))
+    }
+}
+
+pub struct CacheConfig {
+    pub line_size: u32,
+    pub size: u32,
+    pub way_count: u8,
+}
+
+pub struct ChipConfig {
+    pub icache: CacheConfig,
+    pub dcache: CacheConfig,
+
+    pub sram: MemoryConfig,
+    pub srom: MemoryConfig,
+    pub iram: MemoryConfig,
+    pub irom: MemoryConfig,
+    pub dram: MemoryConfig,
+    pub drom: MemoryConfig,
+}
+
+impl ChipConfig {
+    pub fn is_icacheable(&self, address: u32) -> bool {
+        if self.icache.size == 0 {
+            return false;
+        }
+        self.iram.is_cacheable(address)
+            || self.irom.is_cacheable(address)
+            || self.sram.is_cacheable(address)
+            || self.srom.is_cacheable(address)
+    }
+
+    pub fn is_dcacheable(&self, address: u32) -> bool {
+        if self.dcache.size == 0 {
+            return false;
+        }
+        self.dram.is_cacheable(address)
+            || self.drom.is_cacheable(address)
+            || self.sram.is_cacheable(address)
+            || self.srom.is_cacheable(address)
+    }
+}

@@ -7,7 +7,8 @@ use std::collections::HashMap;
 
 use crate::{
     architecture::xtensa::arch::{
-        instruction::Instruction, CpuRegister, Register, SpecialRegister,
+        instruction::Instruction, CacheConfig, ChipConfig, CpuRegister, MemoryConfig, MemoryRegion,
+        Register, SpecialRegister,
     },
     probe::JTAGAccess,
     DebugProbeError, MemoryInterface,
@@ -31,6 +32,8 @@ struct XtensaCommunicationInterfaceState {
     saved_registers: HashMap<Register, u32>,
 
     print_exception_cause: bool,
+
+    config: ChipConfig,
 }
 
 /// A interface that implements controls for Xtensa cores.
@@ -54,6 +57,78 @@ impl XtensaCommunicationInterface {
             state: XtensaCommunicationInterfaceState {
                 saved_registers: HashMap::new(),
                 print_exception_cause: true,
+                config: ChipConfig {
+                    // ESP32-S3
+                    icache: CacheConfig {
+                        line_size: 0,
+                        size: 0,
+                        way_count: 1,
+                    },
+                    dcache: CacheConfig {
+                        line_size: 0,
+                        size: 0,
+                        way_count: 1,
+                    },
+
+                    sram: MemoryConfig { regions: vec![] },
+                    srom: MemoryConfig { regions: vec![] },
+                    iram: MemoryConfig {
+                        regions: vec![
+                            MemoryRegion {
+                                addr: 0x40370000,
+                                size: 0x70000,
+                            },
+                            MemoryRegion {
+                                addr: 0x600FE000,
+                                size: 0x2000,
+                            },
+                        ],
+                    },
+                    irom: MemoryConfig {
+                        regions: vec![
+                            MemoryRegion {
+                                addr: 0x42000000,
+                                size: 0x2000000,
+                            },
+                            MemoryRegion {
+                                addr: 0x40000000,
+                                size: 0x60000,
+                            },
+                        ],
+                    },
+                    dram: MemoryConfig {
+                        regions: vec![
+                            MemoryRegion {
+                                addr: 0x3FC88000,
+                                size: 0x78000,
+                            },
+                            MemoryRegion {
+                                addr: 0x600FE000,
+                                size: 0x2000,
+                            },
+                            MemoryRegion {
+                                addr: 0x50000000,
+                                size: 0x2000,
+                            },
+                            MemoryRegion {
+                                addr: 0x60000000,
+                                size: 0x10000000,
+                            },
+                        ],
+                    },
+                    drom: MemoryConfig {
+                        regions: vec![
+                            MemoryRegion {
+                                addr: 0x3C000000,
+                                size: 0x1000000,
+                            },
+                            MemoryRegion {
+                                addr: 0x3FF00000,
+                                size: 0x20000,
+                            },
+                        ],
+                    },
+                },
             },
         };
 
@@ -445,7 +520,48 @@ impl MemoryInterface for XtensaCommunicationInterface {
             self.write_memory_unaligned8(addr, buffer)?;
         }
 
-        // TODO: implement cache flushing on CPUs that need it.
+        // flush caches if we need to
+        let flush_icache = self.state.config.is_icacheable(address as u32);
+        let flush_dcache = self.state.config.is_dcacheable(address as u32);
+
+        let line_size = match (flush_icache, flush_dcache) {
+            (true, true) => self
+                .state
+                .config
+                .icache
+                .line_size
+                .max(self.state.config.dcache.line_size),
+            (true, false) => self.state.config.icache.line_size,
+            (false, true) => self.state.config.dcache.line_size,
+            (false, false) => {
+                // Written memory can't be cached, so we don't need to flush
+                return Ok(());
+            }
+        };
+
+        let mut off = 0;
+        let mut addr = address & !0x03;
+        let addr_end = addr + data.len() as u32;
+
+        while addr + off < addr_end {
+            if off == 0 {
+                self.write_cpu_register(CpuRegister::A3, addr)?;
+            }
+
+            if flush_icache {
+                self.execute_instruction(Instruction::Ihi(CpuRegister::A3, off))?;
+            }
+            if flush_dcache {
+                self.execute_instruction(Instruction::Dhwbi(CpuRegister::A3, off))?;
+            }
+
+            off += line_size;
+
+            if off > 1020 {
+                addr += off;
+                off = 0;
+            }
+        }
 
         Ok(())
     }
