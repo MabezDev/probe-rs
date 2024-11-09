@@ -8,6 +8,7 @@ chip_detection:
   variants:
     0x0: esp32p4
     0x0addbad0: esp32p4
+    0x00c9aa83: esp32p4
 variants:
 - name: esp32p4
   cores:

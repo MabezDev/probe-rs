@@ -39,7 +39,7 @@ impl RiscvDebugSequence for ESP32P4 {
         interface.write_word_32(0x50116018, 0x50D83AA1)?; // write protection off
         interface.write_word_32(0x50116000, 0x0)?;
         interface.write_word_32(0x50116030, 0xC0000000)?; // clear interrupt state
-        interface.write_word_32(0x50116030, 0x0)?; // write protection on
+        interface.write_word_32(0x50116018, 0x0)?; // write protection on
 
         Ok(())
     }

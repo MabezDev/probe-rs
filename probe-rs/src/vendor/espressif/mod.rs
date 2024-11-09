@@ -2,7 +2,7 @@
 
 use probe_rs_target::{
     chip_detection::{ChipDetectionMethod, EspressifDetection},
-    Chip,
+    Chip, CoreType,
 };
 
 use crate::{
@@ -51,6 +51,13 @@ fn try_detect_espressif_chip(probe: &mut impl MemoryInterface, idcode: u32) -> O
         {
             if info.idcode != idcode {
                 continue;
+            }
+            // HACK: if all cores are riscv, its a riscv chip (currently)
+            // IDCODES are unique to riscv chips so we can stop here and return early
+            for variant in family.variants() {
+                if variant.cores.iter().all(|c| matches!(c.core_type, CoreType::Riscv)) {
+                    return Some(variant.name.clone());
+                }
             }
             let Ok(read_magic) = probe.read_word_32(MAGIC_VALUE_ADDRESS) else {
                 continue;

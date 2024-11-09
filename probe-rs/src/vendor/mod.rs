@@ -171,7 +171,7 @@ fn try_detect_arm_chip(mut probe: Probe) -> Result<(Probe, Option<Target>), Erro
 fn try_detect_riscv_chip(probe: &mut Probe) -> Result<Option<Target>, Error> {
     let mut found_target = None;
 
-    probe.select_jtag_tap(0)?;
+    probe.select_jtag_tap(1)?;
 
     match probe.try_get_riscv_interface_builder() {
         Ok(factory) => {
