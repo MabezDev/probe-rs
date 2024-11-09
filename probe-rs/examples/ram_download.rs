@@ -60,6 +60,7 @@ fn main() -> Result<()> {
         .attach(target_selector, Permissions::default())
         .context("Failed to attach probe to target")?;
     let mut core = session.core(0).context("Failed to attach to core")?;
+    core.reset_and_halt(Duration::from_millis(500))?;
 
     let data_size_words = matches.size;
 
